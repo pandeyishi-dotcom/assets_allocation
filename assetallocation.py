@@ -37,58 +37,61 @@ st.sidebar.title("📊 Fintech Dashboard")
 menu = st.sidebar.radio("Navigation", ["🏠 Home", "💹 Live Market", "🧩 Asset Allocation", "🎯 Goals & Simulation", "📈 Efficient Frontier"])
 
 # ------------------ LIVE MARKET ------------------ #
-# ------------------ LIVE MARKET ------------------ #
 if menu == "💹 Live Market":
-    import datetime
-    import yfinance as yf
-    import pandas as pd
-    import numpy as np
-    import plotly.graph_objects as go
-    import streamlit as st
+    st.header("💹 Live Indian Market Tracker (NIFTY 50)")
 
-    st.title("📊 Live Indian Market Tracker (NIFTY 50)")
-
-    # Add subtitle with current date & time
-    now = datetime.datetime.now().strftime("%d %B %Y, %I:%M %p")
-    st.markdown(f"**As of:** {now}")
-
-    # Try to fetch live Nifty 50 data
+    # --- Fetch NIFTY data safely ---
     try:
-        try:     nifty = yf.download("^NSEI", period="5d", interval="15m")     if nifty.empty:         nifty = yf.download("^NSEI", period="1mo", interval="1d") except Exception:     nifty = pd.DataFrame()  if nifty.empty:     nifty = yf.download("^NSEI", period="1mo", interval="1d")
-        if not nifty.empty:
-            last_price = round(nifty["Close"].iloc[-1], 2)
-            prev_close = round(nifty["Close"].iloc[0], 2)
-            change = round(last_price - prev_close, 2)
-            pct_change = round((change / prev_close) * 100, 2)
+        nifty = yf.download("^NSEI", period="5d", interval="15m", progress=False)
+        if nifty.empty:
+            nifty = yf.download("^NSEI", period="1mo", interval="1d", progress=False)
+    except Exception:
+        nifty = pd.DataFrame()
 
-            # Market summary
-            if change > 0:
-                st.success(f"▲ NIFTY 50 is up by {change} points ({pct_change}%) to **{last_price}** 🟢")
-            elif change < 0:
-                st.error(f"▼ NIFTY 50 is down by {abs(change)} points ({abs(pct_change)}%) to **{last_price}** 🔴")
-            else:
-                st.info(f"⏸ NIFTY 50 is unchanged at **{last_price}**")
+    nifty_symbols = ["^NSEI", "^BSESN", "TCS.NS", "INFY.NS", "RELIANCE.NS", "HDFCBANK.NS"]
+    df_list = []
 
-            # Plot intraday chart
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=nifty.index, y=nifty["Close"], mode="lines", name="NIFTY 50"))
-            fig.update_layout(title="📈 Intraday Price Movement", xaxis_title="Time", yaxis_title="Price (INR)")
-            st.plotly_chart(fig, use_container_width=True)
+    for symbol in nifty_symbols:
+        try:
+            data = yf.download(symbol, period="5d", interval="1d", progress=False)
+            if not data.empty:
+                df_list.append({
+                    "Symbol": symbol,
+                    "Price": round(data["Close"].iloc[-1], 2),
+                    "Change (%)": round(((data["Close"].iloc[-1] - data["Close"].iloc[-2]) / data["Close"].iloc[-2]) * 100, 2)
+                })
+        except Exception:
+            pass
 
-        else:
-            st.warning("⚠️ Could not fetch live data. Please check your internet connection.")
-    except Exception as e:
-        st.error("❌ No live data available. Please check your internet or try again later.")
+    df = pd.DataFrame(df_list)
 
+    if not df.empty:
+        df["Status"] = np.where(df["Change (%)"] > 0, "▲ Gain", "▼ Loss")
+
+        fig = go.Figure(data=[go.Table(
+            header=dict(values=list(df.columns),
+                        fill_color="#00FFC6",
+                        align='center'),
+            cells=dict(values=[df["Symbol"], df["Price"], df["Change (%)"], df["Status"]],
+                       fill_color=[["#161a1f"] * len(df)],
+                       align='center'))
+        ])
+        fig.update_layout(margin=dict(l=0, r=0, t=10, b=10))
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning("⚠️ Could not fetch live data. Please check your internet connection.")
 
 # ------------------ ASSET ALLOCATION ------------------ #
 elif menu == "🧩 Asset Allocation":
     st.header("🧩 Intelligent Asset Allocation")
     st.write("Balance risk and reward with AI-driven diversification across asset classes.")
+
     options = ["Equity", "Debt", "Gold", "REITs", "Crypto", "Cash"]
     weights = {}
+
     for opt in options:
         weights[opt] = st.slider(f"{opt} Allocation (%)", 0, 100, 15)
+
     total = sum(weights.values())
     if total != 100:
         st.warning(f"⚠️ Allocations must total 100%. Current total: {total}%")
@@ -103,6 +106,7 @@ elif menu == "🧩 Asset Allocation":
 elif menu == "🎯 Goals & Simulation":
     st.header("🎯 Smart Goal Planning")
     st.write("Estimate future corpus and assess how your investments compound over time.")
+
     c1, c2, c3 = st.columns(3)
     with c1:
         amount = st.number_input("Initial Investment (₹)", 10000, 10000000, 100000)
@@ -125,6 +129,7 @@ elif menu == "🎯 Goals & Simulation":
 elif menu == "📈 Efficient Frontier":
     st.header("📈 Efficient Frontier Simulation (AI Risk-Return Model)")
     st.write("Visualize optimal portfolios balancing expected return and risk.")
+
     np.random.seed(42)
     n_portfolios = 1000
     returns = np.random.normal(0.1, 0.03, n_portfolios)
