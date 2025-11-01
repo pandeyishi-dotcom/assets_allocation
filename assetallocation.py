@@ -1,5 +1,5 @@
-# ✅ ASSET ALLOCATION - AI DRIVEN FINTECH DASHBOARD
-# Built for Streamlit Cloud | Indian Market | Professional Dark Theme
+# ✅ AI-DRIVEN ASSET ALLOCATION FINTECH DASHBOARD
+# Professional Dark Theme | Smart Live Indian Market (NIFTY 50 + LTP Mode)
 
 import streamlit as st
 import yfinance as yf
@@ -7,7 +7,8 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import date
+from datetime import date, datetime
+import pytz
 
 # ------------------ CONFIGURATION ------------------ #
 st.set_page_config(page_title="AI-Driven Asset Allocation Dashboard", layout="wide")
@@ -40,13 +41,18 @@ menu = st.sidebar.radio("Navigation", ["🏠 Home", "💹 Live Market", "🧩 As
 if menu == "💹 Live Market":
     st.header("💹 Live Indian Market Tracker (NIFTY 50)")
 
-    # --- Fetch NIFTY data safely ---
-    try:
+    india_tz = pytz.timezone("Asia/Kolkata")
+    now = datetime.now(india_tz)
+    market_open = now.hour >= 9 and (now.hour < 15 or (now.hour == 15 and now.minute <= 30))
+    is_weekend = now.weekday() >= 5  # Saturday/Sunday
+
+    # Dynamic market mode
+    if market_open and not is_weekend:
+        data_mode = "Live"
         nifty = yf.download("^NSEI", period="5d", interval="15m", progress=False)
-        if nifty.empty:
-            nifty = yf.download("^NSEI", period="1mo", interval="1d", progress=False)
-    except Exception:
-        nifty = pd.DataFrame()
+    else:
+        data_mode = "Market Closed"
+        nifty = yf.download("^NSEI", period="1mo", interval="1d", progress=False)
 
     nifty_symbols = ["^NSEI", "^BSESN", "TCS.NS", "INFY.NS", "RELIANCE.NS", "HDFCBANK.NS"]
     df_list = []
@@ -55,11 +61,10 @@ if menu == "💹 Live Market":
         try:
             data = yf.download(symbol, period="5d", interval="1d", progress=False)
             if not data.empty:
-                df_list.append({
-                    "Symbol": symbol,
-                    "Price": round(data["Close"].iloc[-1], 2),
-                    "Change (%)": round(((data["Close"].iloc[-1] - data["Close"].iloc[-2]) / data["Close"].iloc[-2]) * 100, 2)
-                })
+                price = round(data["Close"].iloc[-1], 2)
+                prev = round(data["Close"].iloc[-2], 2)
+                change = round(((price - prev) / prev) * 100, 2)
+                df_list.append({"Symbol": symbol, "Price (₹)": price, "Change (%)": change})
         except Exception:
             pass
 
@@ -72,14 +77,24 @@ if menu == "💹 Live Market":
             header=dict(values=list(df.columns),
                         fill_color="#00FFC6",
                         align='center'),
-            cells=dict(values=[df["Symbol"], df["Price"], df["Change (%)"], df["Status"]],
-                       fill_color=[["#161a1f"] * len(df)],
-                       align='center'))
+            cells=dict(values=[
+                df["Symbol"],
+                df["Price (₹)"],
+                df["Change (%)"],
+                df["Status"]
+            ],
+            fill_color=[["#161a1f"] * len(df)],
+            align='center'))
         ])
         fig.update_layout(margin=dict(l=0, r=0, t=10, b=10))
         st.plotly_chart(fig, use_container_width=True)
+
+        if data_mode == "Market Closed":
+            st.info("📅 Market Closed — showing Last Traded Prices (LTP).")
+        else:
+            st.success("🟢 Market Live — updating from latest trades.")
     else:
-        st.warning("⚠️ Could not fetch live data. Please check your internet connection.")
+        st.warning("⚠️ Could not fetch live data. Please check your connection.")
 
 # ------------------ ASSET ALLOCATION ------------------ #
 elif menu == "🧩 Asset Allocation":
@@ -88,11 +103,10 @@ elif menu == "🧩 Asset Allocation":
 
     options = ["Equity", "Debt", "Gold", "REITs", "Crypto", "Cash"]
     weights = {}
-
     for opt in options:
         weights[opt] = st.slider(f"{opt} Allocation (%)", 0, 100, 15)
-
     total = sum(weights.values())
+
     if total != 100:
         st.warning(f"⚠️ Allocations must total 100%. Current total: {total}%")
     else:
@@ -106,7 +120,6 @@ elif menu == "🧩 Asset Allocation":
 elif menu == "🎯 Goals & Simulation":
     st.header("🎯 Smart Goal Planning")
     st.write("Estimate future corpus and assess how your investments compound over time.")
-
     c1, c2, c3 = st.columns(3)
     with c1:
         amount = st.number_input("Initial Investment (₹)", 10000, 10000000, 100000)
@@ -129,7 +142,6 @@ elif menu == "🎯 Goals & Simulation":
 elif menu == "📈 Efficient Frontier":
     st.header("📈 Efficient Frontier Simulation (AI Risk-Return Model)")
     st.write("Visualize optimal portfolios balancing expected return and risk.")
-
     np.random.seed(42)
     n_portfolios = 1000
     returns = np.random.normal(0.1, 0.03, n_portfolios)
