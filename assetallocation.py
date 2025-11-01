@@ -1,19 +1,21 @@
-# assetallocation_fixed.py
-# Full fintech cockpit (fixed plotting + safe data editor)
-# Requirements: streamlit, yfinance, pandas, numpy, plotly, pytz
+# assetallocation_v2_personalized.py
+# AI Portfolio Cockpit — V2 Personalized Edition
+# Integrates sidebar personalization (name, greeting, quote) into your original app.
+# Requirements: streamlit, yfinance, pandas, numpy, plotly
 
 import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.express as px
-from datetime import date
+from datetime import datetime, date
 from io import StringIO
+import random
 
 # -------------------------
 # Page config & theme
 # -------------------------
-st.set_page_config(page_title="AI Portfolio Cockpit — Fixed", layout="wide", page_icon="💠")
+st.set_page_config(page_title="AI Portfolio Cockpit — Personalized V2", layout="wide", page_icon="💠")
 ACCENT = "#00FFC6"
 BG = "#0e1117"
 CARD = "#0f1720"
@@ -23,19 +25,75 @@ st.markdown(
     f"""
     <style>
       body {{ background: {BG}; color: #e6eef0; }}
-      div[data-testid="stSidebar"]{{background:#071427;}}
+      div[data-testid="stSidebar"]{{background:#071427; color: #e6eef0;}}
       .titlebig{{ font-size:28px; color:{ACCENT}; font-weight:700; margin-bottom:6px;}}
       .muted{{ color:{MUTED}; }}
       .card{{ background:{CARD}; padding:12px; border-radius:10px; }}
       .smallpill{{ font-size:12px; color:#cfeee6; background:#07121a; padding:6px 10px;border-radius:6px;}}
       .footer{{ color: {MUTED}; font-size:12px; }}
+      .greeting {{ font-size:20px; color:#B9FFE0; margin-bottom:4px; font-weight:600; }}
+      .quote {{ color:#cfeee6; font-style:italic; margin-top:4px; }}
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 # -------------------------
-# Utility functions
+# Personalization: Sidebar name + greeting + quote
+# -------------------------
+if "user_name" not in st.session_state:
+    # default to Ishani as you requested earlier
+    st.session_state.user_name = "Ishani"
+
+if "quote" not in st.session_state:
+    st.session_state.quote = None
+
+# small list of short finance/inspiration quotes (you can expand)
+_QUOTE_POOL = [
+    "Invest early. Time is the compounding engine.",
+    "Risk is what’s left over after you think you’ve thought of everything.",
+    "Diversify — not to avoid risk, but to control it.",
+    "Plan like a pessimist, invest like an optimist.",
+    "Small disciplined steps beat sporadic brilliance.",
+    "Data drives decisions; humility preserves capital."
+]
+
+# Sidebar controls (personalization + navigation)
+with st.sidebar:
+    st.markdown(f"<div style='text-align:center'><img src='https://upload.wikimedia.org/wikipedia/commons/6/6b/NSE_Logo.svg' width='120'></div>", unsafe_allow_html=True)
+    # Name input (persists in session_state)
+    name_in = st.text_input("Enter your name", value=st.session_state.user_name, max_chars=32)
+    # Update session state only if changed
+    if name_in and name_in != st.session_state.user_name:
+        st.session_state.user_name = name_in
+
+    # Greeting / quote controls
+    if st.session_state.quote is None or st.button("Show me another quote"):
+        st.session_state.quote = random.choice(_QUOTE_POOL)
+
+    st.markdown("---")
+    st.title("AI Portfolio Cockpit")
+    # Navigation menu (kept same as original)
+    nav = st.radio("Navigate", ["Home", "Live Market", "Market Pulse", "Portfolio", "Asset Allocation", "Allocation Advisor", "Goals & SIP", "Sector Heatmap", "Watchlist"], index=1)
+    st.markdown("---")
+    st.caption("Built for Indian markets • Auto-fallbacks included")
+
+# compute time-based greeting (local server time)
+_now_hour = datetime.now().hour
+if _now_hour < 12:
+    _greeting_prefix = "Good morning"
+elif _now_hour < 17:
+    _greeting_prefix = "Good afternoon"
+else:
+    _greeting_prefix = "Good evening"
+
+# display personalized greeting on main area (top)
+st.markdown(f"<div class='greeting'>{_greeting_prefix}, {st.session_state.user_name} 👋</div>", unsafe_allow_html=True)
+st.markdown(f"<div class='quote'>\"{st.session_state.quote}\"</div>", unsafe_allow_html=True)
+st.write("")  # small spacer
+
+# -------------------------
+# Utility functions (unchanged core logic)
 # -------------------------
 @st.cache_data(ttl=300)
 def fetch_symbol(symbol, period="5d", interval="15m"):
@@ -162,14 +220,8 @@ def sip_projection(monthly_sip, years, annual_return, inflation=0.05):
     return fv, real
 
 # -------------------------
-# Sidebar — top-level nav & settings
+# Sidebar navigation already declared; now branch into pages (kept original V2 behavior)
 # -------------------------
-with st.sidebar:
-    st.markdown(f"<div style='text-align:center'><img src='https://upload.wikimedia.org/wikipedia/commons/6/6b/NSE_Logo.svg' width='120'></div>", unsafe_allow_html=True)
-    st.title("AI Portfolio Cockpit")
-    nav = st.radio("Navigate", ["Home", "Live Market", "Market Pulse", "Portfolio", "Asset Allocation", "Allocation Advisor", "Goals & SIP", "Sector Heatmap", "Watchlist"], index=1)
-    st.markdown("---")
-    st.caption("Built for Indian markets • Auto-fallbacks included")
 
 # -------------------------
 # Home
