@@ -57,7 +57,7 @@ if menu == "💹 Live Market":
         header=dict(values=list(df.columns),
                     fill_color="#00FFC6",
                     align='center'),
-        cells=dict(values=[df.Symbol, df.Price, df["Change (%)"], df.Status],
+        cells=dict(values=[df["Symbol"], df["Price"], df["Change (%)"], df["Status"]],
                    fill_color=[["#161a1f"] * len(df)],
                    align='center'))
     ])
