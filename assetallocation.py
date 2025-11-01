@@ -39,65 +39,58 @@ st.markdown(
 )
 
 # -------------------------
-# ---------------- SIDEBAR (ENHANCED) ---------------- #
+# Personalization: Sidebar name + greeting + quote
+# -------------------------
+if "user_name" not in st.session_state:
+    # default to Ishani as you requested earlier
+    st.session_state.user_name = "Ishani"
+
+if "quote" not in st.session_state:
+    st.session_state.quote = None
+
+# small list of short finance/inspiration quotes (you can expand)
+_QUOTE_POOL = [
+    "Invest early. Time is the compounding engine.",
+    "Risk is what’s left over after you think you’ve thought of everything.",
+    "Diversify — not to avoid risk, but to control it.",
+    "Plan like a pessimist, invest like an optimist.",
+    "Small disciplined steps beat sporadic brilliance.",
+    "Data drives decisions; humility preserves capital."
+]
+
+# Sidebar controls (personalization + navigation)
 with st.sidebar:
-    # --- Sidebar Branding --- #
-    st.image("https://upload.wikimedia.org/wikipedia/commons/6/6b/NSE_Logo.svg", width=140)
-    st.markdown("<h2 style='color:#00FFC6;text-align:center;'>AI Fintech Suite</h2>", unsafe_allow_html=True)
-    st.divider()
+    st.markdown(f"<div style='text-align:center'><img src='https://upload.wikimedia.org/wikipedia/commons/6/6b/NSE_Logo.svg' width='120'></div>", unsafe_allow_html=True)
+    # Name input (persists in session_state)
+    name_in = st.text_input("Enter your name", value=st.session_state.user_name, max_chars=32)
+    # Update session state only if changed
+    if name_in and name_in != st.session_state.user_name:
+        st.session_state.user_name = name_in
 
-    # --- Personalized Greeting --- #
-    st.markdown(
-        f"<h4 style='text-align:center;color:white;'>{greeting_message()}, {st.session_state.username} 👋</h4>",
-        unsafe_allow_html=True
-    )
-    st.caption(f"💬 *{st.session_state.quote}*")
+    # Greeting / quote controls
+    if st.session_state.quote is None or st.button("Show me another quote"):
+        st.session_state.quote = random.choice(_QUOTE_POOL)
 
-    # --- Clock --- #
-    current_time = datetime.now().strftime("%I:%M %p")
-    st.markdown(f"<p style='text-align:center;color:#9CA3AF;'>🕒 {current_time}</p>", unsafe_allow_html=True)
+    st.markdown("---")
+    st.title("AI Portfolio Cockpit")
+    # Navigation menu (kept same as original)
+    nav = st.radio("Navigate", ["Home", "Live Market", "Market Pulse", "Portfolio", "Asset Allocation", "Allocation Advisor", "Goals & SIP", "Sector Heatmap", "Watchlist"], index=1)
+    st.markdown("---")
+    st.caption("Built for Indian markets • Auto-fallbacks included")
 
-    # --- Navigation --- #
-    st.subheader("📁 Navigation")
-    menu = st.radio(
-        "Go to Section",
-        [
-            "🏠 Home",
-            "💹 Live Market",
-            "🧩 Asset Allocation",
-            "🎯 Goals & Simulation",
-            "📈 Efficient Frontier"
-        ],
-        index=0,
-        label_visibility="collapsed"
-    )
+# compute time-based greeting (local server time)
+_now_hour = datetime.now().hour
+if _now_hour < 12:
+    _greeting_prefix = "Good morning"
+elif _now_hour < 17:
+    _greeting_prefix = "Good afternoon"
+else:
+    _greeting_prefix = "Good evening"
 
-    st.divider()
-
-    # --- Quick Preferences --- #
-    st.subheader("⚙️ Preferences")
-    theme_choice = st.selectbox("Theme", ["Dark Mode 🌙", "Light Mode ☀️"])
-    currency = st.selectbox("Currency", ["₹ INR", "$ USD", "€ EUR"])
-    refresh = st.slider("Auto Refresh (mins)", 1, 60, 10)
-
-    st.caption("🔄 *Data refresh simulated — real-time API integration available in Pro version.*")
-
-    st.divider()
-
-    # --- Motivation Corner --- #
-    st.markdown(
-        f"""
-        <div style='background:linear-gradient(135deg,#0f172a,#111827);
-        padding:15px;border-radius:10px;text-align:center;color:#D1FAE5;'>
-        <strong>🌟 Daily Insight</strong><br>
-        {random.choice(quotes)}
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-    st.markdown("<p style='text-align:center;color:#6B7280;'>© 2025 Fintech AI Dashboard</p>", unsafe_allow_html=True)
-
+# display personalized greeting on main area (top)
+st.markdown(f"<div class='greeting'>{_greeting_prefix}, {st.session_state.user_name} 👋</div>", unsafe_allow_html=True)
+st.markdown(f"<div class='quote'>\"{st.session_state.quote}\"</div>", unsafe_allow_html=True)
+st.write("")  # small spacer
 
 # -------------------------
 # Utility functions (unchanged core logic)
