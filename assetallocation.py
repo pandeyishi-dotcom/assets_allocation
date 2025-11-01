@@ -54,7 +54,7 @@ if menu == "💹 Live Market":
 
     # Try to fetch live Nifty 50 data
     try:
-        nifty = yf.download("^NSEI", period="5d", interval="15m") if nifty.empty:     nifty = yf.download("^NSEI", period="1mo", interval="1d")
+        nifty = yf.download("^NSEI", period="5d", interval="15m")  if nifty.empty:     nifty = yf.download("^NSEI", period="1mo", interval="1d")
         if not nifty.empty:
             last_price = round(nifty["Close"].iloc[-1], 2)
             prev_close = round(nifty["Close"].iloc[0], 2)
