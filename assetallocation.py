@@ -1,151 +1,184 @@
-# Live Indian Market Tracker (NIFTY 50) — V2 + Enhanced Sidebar
-# Author: Ishani ❤️
-# Built with Streamlit
-# This version merges the upgraded sidebar and enhanced UI layout.
+# ✅ AI-Driven Fintech Dashboard V3
+# Personalized with Greeting, Quotes & Full Analytics Suite
 
 import streamlit as st
+import yfinance as yf
 import pandas as pd
 import numpy as np
-import datetime
-import requests
+import plotly.express as px
+import plotly.graph_objects as go
+from datetime import datetime
+import random
 
-# --- PAGE CONFIG ---
-st.set_page_config(
-    page_title="Live Indian Market Tracker (NIFTY 50)",
-    page_icon="📈",
-    layout="wide"
-)
+# ---------------- CONFIGURATION ---------------- #
+st.set_page_config(page_title="AI-Driven Fintech Dashboard", layout="wide")
 
-# --- SIDEBAR SECTION ---
+# ---------------- STYLING ---------------- #
+st.markdown("""
+    <style>
+        body {background-color: #0e1117;}
+        .main {background-color: #0e1117; color: white;}
+        div[data-testid="stSidebar"] {background-color: #111827;}
+        h1, h2, h3, h4, h5 {color: #00FFC6; font-family: 'Poppins', sans-serif;}
+        .stDataFrame {border-radius: 12px;}
+        .welcome-box {
+            text-align: center;
+            padding: 50px;
+            border-radius: 20px;
+            background: linear-gradient(135deg, #111827, #0e1117);
+            color: white;
+            font-family: 'Poppins', sans-serif;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+# ---------------- MOTIVATIONAL QUOTES ---------------- #
+quotes = [
+    "Invest in your dreams. Grind now. Shine later.",
+    "Discipline is the bridge between goals and achievement.",
+    "Wealth is the ability to fully experience life.",
+    "Risk comes from not knowing what you're doing.",
+    "Don’t look for the needle in the haystack. Just buy the haystack."
+]
+
+# ---------------- USER INPUT / GREETING ---------------- #
+if "username" not in st.session_state:
+    st.markdown("<div class='welcome-box'>", unsafe_allow_html=True)
+    st.title("🤖 Welcome to the AI-Driven Fintech Dashboard")
+    st.write("Enter your name to personalize your experience:")
+    name = st.text_input("Your Name", placeholder="e.g. Ishani", key="username_input")
+
+    if st.button("Start Dashboard 🚀"):
+        if name.strip():
+            st.session_state.username = name.strip().title()
+            st.session_state.quote = random.choice(quotes)
+            st.experimental_rerun()
+        else:
+            st.warning("Please enter your name to continue.")
+    st.markdown("</div>", unsafe_allow_html=True)
+    st.stop()
+
+# ---------------- HELPER FUNCTIONS ---------------- #
+def greeting_message():
+    hour = datetime.now().hour
+    if hour < 12:
+        return "Good Morning"
+    elif hour < 17:
+        return "Good Afternoon"
+    else:
+        return "Good Evening"
+
+# ---------------- SIDEBAR ---------------- #
 with st.sidebar:
-    st.title("📊 Ishani's Market Dashboard")
-    st.markdown("Welcome, **Ishani 👋**")
-    st.divider()
+    st.image("https://upload.wikimedia.org/wikipedia/commons/6/6b/NSE_Logo.svg", width=130)
+    st.title("📊 Fintech Dashboard")
 
-    # Market status logic
-    now = datetime.datetime.now()
-    market_open = now.weekday() < 5 and now.hour >= 9 and now.hour < 15 and not (
-        now.hour == 15 and now.minute > 30
-    )
+    st.markdown(f"### {greeting_message()}, {st.session_state.username} 👋")
+    st.markdown(f"💬 *{st.session_state.quote}*")
 
-    if market_open:
-        st.success("🟢 Market is OPEN")
-    else:
-        st.error("🔴 Market is CLOSED — Showing last known LTP")
+    menu = st.radio("Navigate", [
+        "🏠 Home",
+        "💹 Live Market",
+        "🧩 Asset Allocation",
+        "🎯 Goals & Simulation",
+        "📈 Efficient Frontier"
+    ])
 
-    st.markdown("---")
-    st.markdown("### 🧭 Navigation")
-    section = st.radio(
-        "Choose a section:",
-        ["Market Overview", "Asset Allocation", "Analytics"],
-        index=0
-    )
+# ---------------- MODULE: HOME ---------------- #
+if menu == "🏠 Home":
+    st.title("🤖 AI-Driven Portfolio Planner")
+    st.subheader("Transform your investments with automation, analytics, and intelligence.")
+    st.markdown("""
+        Welcome to the **AI-Driven Fintech Dashboard** — a smart investment platform for the modern investor.
 
-    st.markdown("---")
-    st.caption("Made with ❤️ by Ishani | Powered by Streamlit")
+        Features include:
+        - 💹 Real-time Indian market tracking (NIFTY 50 + Top Stocks)
+        - 🧩 AI-guided asset allocation
+        - 🎯 Goal-based wealth simulations
+        - 📈 Efficient frontier for risk-return optimization
+        
+        🌱 *Designed for insight. Powered by intelligence.*
+    """)
 
-# --- FETCH DATA FUNCTION ---
-@st.cache_data(ttl=300)
-def fetch_nifty_data():
+# ---------------- MODULE: LIVE MARKET ---------------- #
+elif menu == "💹 Live Market":
+    st.header("💹 Live Indian Market Tracker (NIFTY 50)")
     try:
-        url = "https://www.nseindia.com/api/equity-stockIndices?index=NIFTY%2050"
-        headers = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(url, headers=headers, timeout=10)
-        data = response.json()
+        nifty = yf.download("^NSEI", period="5d", interval="15m", progress=False)
+        if nifty.empty:
+            nifty = yf.download("^NSEI", period="1mo", interval="1d", progress=False)
 
-        df = pd.DataFrame(data["data"])
-        df = df[["symbol", "open", "dayHigh", "dayLow", "lastPrice", "pChange"]]
-        df.rename(
-            columns={
-                "symbol": "Symbol",
-                "open": "Open",
-                "dayHigh": "High",
-                "dayLow": "Low",
-                "lastPrice": "LTP",
-                "pChange": "% Change",
-            },
-            inplace=True,
-        )
-        return df
+        latest = nifty["Close"].iloc[-1]
+        prev = nifty["Close"].iloc[-2]
+        change = latest - prev
+        pct = (change / prev) * 100
 
+        colA, colB, colC = st.columns(3)
+        colA.metric("NIFTY 50 (LTP)", f"{latest:,.2f}")
+        colB.metric("Δ (points)", f"{change:+.2f}")
+        colC.metric("Change (%)", f"{pct:+.2f}%")
+
+        st.line_chart(nifty["Close"], use_container_width=True)
     except Exception:
-        return None
+        st.warning("⚠️ Could not fetch live data. Displaying placeholder chart.")
+        dummy = pd.Series(np.random.randn(20).cumsum(), name="NIFTY (Simulated)")
+        st.line_chart(dummy, use_container_width=True)
 
-# --- DATA FETCH ---
-nifty_df = fetch_nifty_data()
-
-# --- MAIN LAYOUT ---
-st.title("🇮🇳 Live Indian Market Tracker (NIFTY 50)")
-
-if section == "Market Overview":
-    st.subheader("📈 NIFTY 50 Overview")
-
-    if nifty_df is None or nifty_df.empty:
-        st.warning("⚠️ Could not fetch live data. Showing offline fallback.")
-        nifty_df = pd.DataFrame({
-            "Symbol": ["NIFTY 50"],
-            "Open": [0],
-            "High": [0],
-            "Low": [0],
-            "LTP": [0],
-            "% Change": [0],
-        })
+# ---------------- MODULE: ASSET ALLOCATION ---------------- #
+elif menu == "🧩 Asset Allocation":
+    st.header("🧩 Intelligent Asset Allocation")
+    st.write("Balance risk and reward with AI-driven diversification across asset classes.")
+    options = ["Equity", "Debt", "Gold", "REITs", "Crypto", "Cash"]
+    weights = {}
+    for opt in options:
+        weights[opt] = st.slider(f"{opt} Allocation (%)", 0, 100, 15)
+    total = sum(weights.values())
+    if total != 100:
+        st.warning(f"⚠️ Allocations must total 100%. Current total: {total}%")
     else:
-        st.success("✅ Live market data loaded successfully!")
+        df_alloc = pd.DataFrame(list(weights.items()), columns=["Asset Class", "Allocation (%)"])
+        fig = px.pie(df_alloc, names="Asset Class", values="Allocation (%)",
+                     color_discrete_sequence=px.colors.sequential.Tealgrn)
+        st.plotly_chart(fig, use_container_width=True)
+        st.success("✅ Allocation successfully created!")
 
-    # Calculate key metrics
-    avg_change = nifty_df["% Change"].mean()
-    top_gainer = nifty_df.loc[nifty_df["% Change"].idxmax()]
-    top_loser = nifty_df.loc[nifty_df["% Change"].idxmin()]
+# ---------------- MODULE: GOALS ---------------- #
+elif menu == "🎯 Goals & Simulation":
+    st.header("🎯 Smart Goal Planning")
+    st.write("Estimate future corpus and assess how your investments compound over time.")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        amount = st.number_input("Initial Investment (₹)", 10000, 10000000, 100000)
+    with c2:
+        years = st.slider("Investment Duration (Years)", 1, 40, 10)
+    with c3:
+        expected_return = st.slider("Expected Annual Return (%)", 4, 20, 10)
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Average % Change", f"{avg_change:.2f}%")
-    col2.metric("Top Gainer", f"{top_gainer['Symbol']} ({top_gainer['% Change']:.2f}%)")
-    col3.metric("Top Loser", f"{top_loser['Symbol']} ({top_loser['% Change']:.2f}%)")
+    future_value = amount * ((1 + expected_return / 100) ** years)
+    st.metric("Projected Corpus", f"₹{future_value:,.0f}", delta=f"{expected_return}% CAGR")
 
-    st.markdown("---")
-    st.dataframe(nifty_df, use_container_width=True)
-
-    # Chart visualization
-    st.subheader("📊 Price Movement Visualization")
-    st.line_chart(nifty_df.set_index("Symbol")["% Change"], use_container_width=True)
-
-elif section == "Asset Allocation":
-    st.subheader("💰 Portfolio Asset Allocation")
-
-    default_df = pd.DataFrame({
-        "Asset Class": ["Equity", "Debt", "Gold", "Real Estate", "Cash"],
-        "Allocation (%)": [50, 20, 10, 15, 5],
+    data = pd.DataFrame({
+        "Year": list(range(1, years + 1)),
+        "Value": [amount * ((1 + expected_return / 100) ** i) for i in range(1, years + 1)]
     })
+    fig = px.line(data, x="Year", y="Value", title="Investment Growth Over Time", color_discrete_sequence=["#00FFC6"])
+    st.plotly_chart(fig, use_container_width=True)
 
-    edited = st.data_editor(default_df, num_rows="dynamic", use_container_width=True)
+# ---------------- MODULE: EFFICIENT FRONTIER ---------------- #
+elif menu == "📈 Efficient Frontier":
+    st.header("📈 Efficient Frontier Simulation (AI Risk-Return Model)")
+    st.write("Visualize optimal portfolios balancing expected return and risk.")
+    np.random.seed(42)
+    n_portfolios = 1000
+    returns = np.random.normal(0.1, 0.03, n_portfolios)
+    risk = np.random.normal(0.15, 0.05, n_portfolios)
 
-    st.markdown("#### 📊 Allocation Summary")
-    total_alloc = edited["Allocation (%)"].sum()
-
-    if total_alloc != 100:
-        st.warning(f"⚠️ Allocation total = {total_alloc}%. Please make sure it sums to 100%.")
-    else:
-        st.success("✅ Allocation perfectly balanced!")
-
-    st.bar_chart(edited.set_index("Asset Class"))
-
-elif section == "Analytics":
-    st.subheader("📉 Portfolio Risk & Performance Analytics")
-
-    try:
-        # Simulated data for demo
-        np.random.seed(42)
-        days = 100
-        dates = pd.date_range(end=datetime.datetime.now(), periods=days)
-        returns = np.random.normal(0.001, 0.02, days).cumsum()
-        df = pd.DataFrame({"Date": dates, "Portfolio Value": 100 * (1 + returns)})
-
-        st.line_chart(df.set_index("Date"), use_container_width=True)
-        st.caption("Simulated performance chart for portfolio analytics demonstration.")
-    except Exception as e:
-        st.error(f"Error generating analytics: {e}")
-
-# --- FOOTER ---
-st.markdown("---")
-st.caption("© 2025 Ishani | Educational Use Only | Data from NSE India")
+    frontier = pd.DataFrame({"Expected Return": returns, "Risk": risk})
+    fig = px.scatter(frontier, x="Risk", y="Expected Return", color="Expected Return",
+                     color_continuous_scale="Tealgrn", title="Efficient Frontier Simulation")
+    fig.add_trace(go.Scatter(x=[0.15], y=[0.1],
+                             mode="markers+text",
+                             text=["Current Portfolio"],
+                             textposition="top center",
+                             marker=dict(size=14, color="gold")))
+    st.plotly_chart(fig, use_container_width=True)
