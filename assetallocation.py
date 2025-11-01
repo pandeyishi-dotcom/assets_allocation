@@ -37,32 +37,49 @@ st.sidebar.title("📊 Fintech Dashboard")
 menu = st.sidebar.radio("Navigation", ["🏠 Home", "💹 Live Market", "🧩 Asset Allocation", "🎯 Goals & Simulation", "📈 Efficient Frontier"])
 
 # ------------------ LIVE MARKET ------------------ #
+# ------------------ LIVE MARKET ------------------ #
 if menu == "💹 Live Market":
-    st.header("💹 Live Indian Market Tracker (NIFTY 50)")
-    nifty_symbols = ["^NSEI", "^BSESN", "TCS.NS", "INFY.NS", "RELIANCE.NS", "HDFCBANK.NS"]
-    df_list = []
+    import datetime
+    import yfinance as yf
+    import pandas as pd
+    import numpy as np
+    import plotly.graph_objects as go
+    import streamlit as st
 
-    for symbol in nifty_symbols:
-        data = yf.download(symbol, period="5d", interval="1d", progress=False)
-        if not data.empty:
-            df_list.append({
-                "Symbol": symbol,
-                "Price": round(data["Close"].iloc[-1], 2),
-                "Change (%)": round(((data["Close"].iloc[-1] - data["Close"].iloc[-2]) / data["Close"].iloc[-2]) * 100, 2)
-            })
-    df = pd.DataFrame(df_list)
-    # Ensure Change (%) column exists before using it if "Change (%)" not in df.columns and "Price" in df.columns and "Prev Close" in df.columns:     df["Change (%)"] = ((df["Price"] - df["Prev Close"]) / df["Prev Close"]) * 100  if "Change (%)" in df.columns:     df["Status"] = np.where(df["Change (%)"] > 0, "▲ Gain", "▼ Loss") else:     df["Status"] = "N/A"
+    st.title("📊 Live Indian Market Tracker (NIFTY 50)")
 
-    fig = go.Figure(data=[go.Table(
-        header=dict(values=list(df.columns),
-                    fill_color="#00FFC6",
-                    align='center'),
-        cells = dict(values=[     df.get("Symbol", ["N/A"] * len(df)),     df.get("Price", ["N/A"] * len(df)),     df.get("Change (%)", ["N/A"] * len(df)),     df.get("Status", ["N/A"] * len(df)), ],
-                   fill_color=[["#161a1f"] * len(df)],
-                   align='center'))
-    ])
-    fig.update_layout(margin=dict(l=0, r=0, t=10, b=10))
-    st.plotly_chart(fig, use_container_width=True)
+    # Add subtitle with current date & time
+    now = datetime.datetime.now().strftime("%d %B %Y, %I:%M %p")
+    st.markdown(f"**As of:** {now}")
+
+    # Try to fetch live Nifty 50 data
+    try:
+        nifty = yf.download("^NSEI", period="1d", interval="1m")
+        if not nifty.empty:
+            last_price = round(nifty["Close"].iloc[-1], 2)
+            prev_close = round(nifty["Close"].iloc[0], 2)
+            change = round(last_price - prev_close, 2)
+            pct_change = round((change / prev_close) * 100, 2)
+
+            # Market summary
+            if change > 0:
+                st.success(f"▲ NIFTY 50 is up by {change} points ({pct_change}%) to **{last_price}** 🟢")
+            elif change < 0:
+                st.error(f"▼ NIFTY 50 is down by {abs(change)} points ({abs(pct_change)}%) to **{last_price}** 🔴")
+            else:
+                st.info(f"⏸ NIFTY 50 is unchanged at **{last_price}**")
+
+            # Plot intraday chart
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=nifty.index, y=nifty["Close"], mode="lines", name="NIFTY 50"))
+            fig.update_layout(title="📈 Intraday Price Movement", xaxis_title="Time", yaxis_title="Price (INR)")
+            st.plotly_chart(fig, use_container_width=True)
+
+        else:
+            st.warning("⚠️ Could not fetch live data. Please check your internet connection.")
+    except Exception as e:
+        st.error("❌ No live data available. Please check your internet or try again later.")
+
 
 # ------------------ ASSET ALLOCATION ------------------ #
 elif menu == "🧩 Asset Allocation":
