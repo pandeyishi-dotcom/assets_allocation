@@ -1,35 +1,32 @@
 # asset_allocation_app.py
 """
-Futuristic Smart Asset Allocation (India Edition)
+Futuristic AI Asset Allocation Dashboard — India Edition
 - Dark neon theme, Lottie header (finance-themed)
-- Live market auto-refresh (every 5 minutes)
-- Custom allocation logic, robust goal parser with progress
-- Monte Carlo simulations, efficient frontier, correlation heatmap
-- Downloadable CSV / Excel outputs
+- Auto-refresh market data every 5 minutes (client-side JS)
+- Editable persistent watchlist (st.session_state)
+- Live ticker marquee and neon sparkline cards
+- Portfolio Allocation, Goals, Analytics tabs (simplified)
+- Defensive: falls back if yfinance/index tickers blocked
 """
 
 import streamlit as st
 import pandas as pd
 import numpy as np
+import yfinance as yf
 import plotly.express as px
 import plotly.graph_objects as go
-import yfinance as yf
 import requests
-import io
 import time
 from datetime import datetime
-from math import ceil
 
 # ---------------- Page config ----------------
-st.set_page_config(page_title="Futuristic Asset Allocator (India)", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="AI Futuristic Asset Allocator (India)", layout="wide", initial_sidebar_state="expanded")
 
-# ---------------- Auto page reload every 5 minutes (300000 ms) ----------------
-# This uses a small client-side JS to reload the page automatically.
+# ---------------- Auto reload (client-side) ----------------
 AUTO_RELOAD_MS = 300000  # 5 minutes
 st.components.v1.html(f"""
 <script>
 setTimeout(function() {{
-    // reload only if the tab is visible (reduce unnecessary reloads)
     if (document.visibilityState === 'visible') {{
         window.location.reload();
     }}
@@ -37,62 +34,54 @@ setTimeout(function() {{
 </script>
 """, height=0)
 
-# ---------------- CSS (futuristic dark neon) ----------------
-st.markdown(
-    """
-    <style>
-    :root{
-      --bg:#0b0f19;
-      --panel: rgba(255,255,255,0.03);
-      --glass: rgba(255,255,255,0.02);
-      --neon:#00e5ff;
-      --accent:#26ffe6;
-      --muted:#9fb4c8;
-      --gold:#ffd166;
-    }
-    body { background: linear-gradient(180deg, #05060a 0%, #0b0f19 100%); color:#E6F2F5; }
-    .header { display:flex; align-items:center; gap:18px; }
-    .title { font-size:22px; font-weight:700; color:var(--neon); margin-bottom:2px; }
-    .subtitle { color:var(--muted); margin-top:0; margin-bottom:8px; font-size:13px; }
-    .card { background: var(--glass); border-radius:12px; padding:14px; border:1px solid rgba(255,255,255,0.03); box-shadow:0 10px 30px rgba(0,0,0,0.5); }
-    .muted { color:var(--muted); font-size:13px; }
-    .metric { background:#071425; border-radius:10px; padding:10px; text-align:center; }
-    .metric-val { color:var(--accent); font-weight:700; font-size:18px; }
-    .small { font-size:12px; color:var(--muted); }
-    .neon-divider { height:2px; background: linear-gradient(90deg, rgba(0,229,255,0), rgba(38,255,230,0.9), rgba(0,229,255,0)); border-radius:4px; margin:8px 0 16px 0; }
-    /* data editor styling fallback */
-    div[role="list"] > div { background: transparent !important; }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+# ---------------- Theme CSS (futuristic neon) ----------------
+st.markdown("""
+<style>
+:root {
+  --bg:#05060a;
+  --panel: rgba(255,255,255,0.02);
+  --glass: rgba(255,255,255,0.03);
+  --neon-cyan:#00e5ff;
+  --neon-teal:#26ffe6;
+  --saffron:#ffd166;
+  --muted:#9FB4C8;
+}
+body { background: linear-gradient(180deg,#05060a,#071425); color:#EAF6F8; }
+.card { background: var(--glass); border-radius:12px; padding:14px; border:1px solid rgba(255,255,255,0.03); box-shadow: 0 8px 30px rgba(0,0,0,0.6);}
+.title { color:var(--neon-cyan); font-weight:700; font-size:22px; margin:0; }
+.subtitle { color:var(--muted); margin:0; font-size:13px; }
+.neon-divider { height:3px; background: linear-gradient(90deg, rgba(0,229,255,0), rgba(38,255,230,0.9), rgba(255,209,102,0.4)); border-radius:4px; margin:10px 0 18px 0; }
+.small { color:var(--muted); font-size:13px; }
+.ticker-slab { background: linear-gradient(90deg, rgba(255,255,255,0.01), rgba(255,255,255,0.02)); padding:8px; border-radius:8px; }
+.marquee { overflow:hidden; white-space:nowrap; }
+.marquee-inner { display:inline-block; animation:scroll 24s linear infinite; }
+@keyframes scroll { 0% { transform: translateX(100%);} 100% { transform: translateX(-100%);} }
+</style>
+""", unsafe_allow_html=True)
 
-# ---------------- Lottie helper ----------------
-# Use streamlit_lottie if available; otherwise fallback to embedding
+# ---------------- Lottie helper (optional) ----------------
 try:
     from streamlit_lottie import st_lottie
-    STREAMLITE_LOTTIE_AVAILABLE = True
+    LOTTIE_OK = True
 except Exception:
-    STREAMLITE_LOTTIE_AVAILABLE = False
+    LOTTIE_OK = False
 
-def load_lottie_from_url(url):
+def load_lottie(url, timeout=6):
     try:
-        r = requests.get(url, timeout=8)
+        r = requests.get(url, timeout=timeout)
         if r.status_code == 200:
             return r.json()
     except Exception:
         return None
 
-# Online finance-themed Lottie URL (public)
-LOTTIE_FINANCE_URL = "https://assets9.lottiefiles.com/packages/lf20_jcikwtux.json"  # finance/dashboard style (common public host)
-lottie_json = load_lottie_from_url(LOTTIE_FINANCE_URL)
+LOTTIE_URL = "https://assets9.lottiefiles.com/packages/lf20_jcikwtux.json"
+lottie_json = load_lottie(LOTTIE_URL)
 
-# ---------------- Sidebar: Inputs ----------------
+# ---------------- Sidebar inputs ----------------
 with st.sidebar:
-    st.markdown("<div class='title'>Futuristic Asset Allocator</div>", unsafe_allow_html=True)
-    st.markdown("<div class='small muted'>India edition — custom profile</div>", unsafe_allow_html=True)
-    st.markdown("---", unsafe_allow_html=True)
-
+    st.markdown("<div style='display:flex;align-items:center;gap:10px'><div style='font-weight:700;color:#26ffe6'>AI Futuristic Allocator</div></div>", unsafe_allow_html=True)
+    st.markdown("<div class='small'>India edition — custom profiles</div>", unsafe_allow_html=True)
+    st.markdown("---")
     age = st.slider("Age", 18, 75, 34)
     monthly_income = st.number_input("Monthly income (₹)", min_value=0, value=70000, step=1000)
     risk_label = st.selectbox("Risk appetite (custom)", ["Very Low", "Low", "Moderate", "High", "Very High"])
@@ -101,378 +90,349 @@ with st.sidebar:
     sip_now = st.number_input("Monthly SIP (₹)", min_value=0, value=10000, step=500)
     horizon_default = st.slider("Default planning horizon (yrs)", 1, 40, 10)
     st.markdown("---")
-    st.header("Simulation / Data")
+    st.header("Market / Simulation")
     mc_sims = st.slider("Monte Carlo sims", 200, 4000, 1200, step=100)
     frontier_samples = st.slider("Frontier samples", 50, 2000, 400, step=50)
-    lookback_years = st.selectbox("Live blending lookback (yrs)", [1,3,5], index=2)
+    lookback_years = st.selectbox("Lookback (yrs) for live blending", [1,3,5], index=2)
     st.markdown("---")
-    st.caption("Auto-refresh enabled every 5 minutes. After updating code, Manage app → Clear cache → Rerun from scratch.")
+    st.caption("Auto-refresh every 5 mins. If live data missing, app uses conservative defaults.")
 
-# ---------------- Asset universe (Indian) ----------------
-ASSET_UNIVERSE = [
-    "Large Cap Equity", "Mid/Small Cap Equity", "International Equity",
-    "Index ETFs", "Equity Mutual Funds (Active)", "Sectoral/Thematic",
-    "Debt Funds", "Government Bonds", "Corporate Bonds",
-    "Gold ETF / SGB", "REITs / InvITs", "Real Estate (Direct)",
-    "Cash / Liquid", "Fixed Deposits", "Commodities (other)", "Crypto (speculative)"
-]
+# ---------------- Watchlist (persistent in session_state) ----------------
+if "watchlist" not in st.session_state:
+    # sensible default set (Nifty may be blocked; keep equities)
+    st.session_state.watchlist = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "GOLDBEES.NS", "ICICIBANK.NS"]
 
-# Simple defaults for returns & vol
-DEFAULT_RETURNS = {
-    "Large Cap Equity": 0.10, "Mid/Small Cap Equity": 0.13, "International Equity": 0.08,
-    "Index ETFs": 0.095, "Equity Mutual Funds (Active)": 0.10, "Sectoral/Thematic": 0.12,
-    "Debt Funds": 0.06, "Government Bonds": 0.05, "Corporate Bonds": 0.06,
-    "Gold ETF / SGB": 0.07, "REITs / InvITs": 0.08, "Real Estate (Direct)": 0.06,
-    "Cash / Liquid": 0.035, "Fixed Deposits": 0.05, "Commodities (other)": 0.06, "Crypto (speculative)": 0.20
-}
-DEFAULT_VOL = {k: (0.20 if "Equity" in k or "Thematic" in k or "Crypto" in k else 0.08) for k in DEFAULT_RETURNS.keys()}
+# small helper functions
+@st.cache_data(ttl=60*10)
+def fetch_close(ticker, period="1y", interval="1d"):
+    """Return Series of close prices or None."""
+    try:
+        df = yf.download(ticker, period=period, interval=interval, progress=False)
+        if df is None or df.empty:
+            return None
+        if "Close" not in df.columns:
+            return None
+        return df["Close"].dropna()
+    except Exception:
+        return None
 
-# Default tickers for live blending (best-effort)
-DEFAULT_TICKERS = {
-    "Large Cap Equity": "^NSEI",
-    "Gold ETF / SGB": "GOLDBEES.NS",
-    "International Equity": "VTI",
-    "REITs / InvITs": "REIT.NS"  # placeholder (may not exist in Yahoo)
-}
-
-# ---------------- small helpers ----------------
 def fmt_inr(x):
     try:
         return "₹{:,.0f}".format(float(x))
     except Exception:
-        return f"₹{x}"
+        return str(x)
 
-@st.cache_data(ttl=60*20)
-def fetch_close_series(ticker, years=5):
-    """Returns pandas Series of Close prices or None"""
-    if not ticker:
-        return None
-    try:
-        t = yf.Ticker(ticker)
-        hist = t.history(period=f"{years}y", interval="1d")
-        close = hist["Close"].dropna()
-        if len(close) < 10:
-            return None
-        return close
-    except Exception:
-        return None
-
-def compute_cagr_and_vol(series):
-    if series is None or len(series) < 10:
-        return None, None
-    years_total = (series.index[-1] - series.index[0]).days / 365.25
-    if years_total <= 0:
-        return None, None
-    cagr = (series.iloc[-1] / series.iloc[0]) ** (1.0 / years_total) - 1.0
-    vol = series.pct_change().dropna().std() * np.sqrt(252)
-    return float(cagr), float(vol)
-
-@st.cache_data(ttl=60*10)
-def monte_carlo_sim(invest, monthly_sip, weights, means, cov, years, sims, seed=42):
-    """Annual Monte Carlo with correlated returns"""
-    years = int(float(years))
-    sims = int(sims)
-    weights = np.array(weights, dtype=float)
-    means = np.array(means, dtype=float)
-    cov = np.array(cov, dtype=float)
-    n = len(weights)
-    cov = cov + np.eye(n) * 1e-10
-    L = np.linalg.cholesky(cov)
-    rng = np.random.default_rng(seed)
-    finals = np.zeros(sims)
-    annual_sip = float(monthly_sip) * 12.0
-    base = weights * invest
-    for s in range(sims):
-        vals = base.copy()
-        for y in range(years):
-            z = rng.normal(size=n)
-            ret = means + L @ z
-            vals = vals * (1 + ret)
-            if annual_sip > 0:
-                vals = vals + annual_sip * weights
-        finals[s] = vals.sum()
-    return finals
-
-# ---------------- Robo-allocation (custom, Indian) ----------------
-def robo_allocation_custom(age, income, risk_label, include_optional=None):
-    """Return allocation dict (percent) — custom user-led baseline influenced by age/income/risk"""
-    include_optional = include_optional or []
-    # start with reasonable baseline buckets
-    base = {
-        "Large Cap Equity": 30, "Mid/Small Cap Equity": 10, "International Equity": 5,
-        "Index ETFs": 10, "Equity Mutual Funds (Active)": 0, "Sectoral/Thematic": 0,
-        "Debt Funds": 25, "Gold ETF / SGB": 8, "REITs / InvITs": 5, "Cash / Liquid": 7
-    }
-    # adjust by risk
-    risk_map = {
-        "Very Low": -15, "Low": -7, "Moderate": 0, "High": 7, "Very High": 15
-    }
-    tilt = risk_map.get(risk_label, 0)
-    # apply tilt to equity vs debt
-    base["Large Cap Equity"] = max(0, base["Large Cap Equity"] + int(tilt * 0.5))
-    base["Mid/Small Cap Equity"] = max(0, base["Mid/Small Cap Equity"] + int(tilt * 0.3))
-    base["Debt Funds"] = max(0, base["Debt Funds"] - int(tilt * 0.6))
-    # age tilt
-    if age < 35:
-        base["Mid/Small Cap Equity"] += 5
-        base["Debt Funds"] = max(0, base["Debt Funds"] - 5)
-    elif age > 60:
-        base["Debt Funds"] += 7
-        base["Large Cap Equity"] = max(0, base["Large Cap Equity"] - 7)
-    # income tilt
-    if income > 150000:
-        base["International Equity"] += 3
-    # include optional assets small allocation
-    for asset in include_optional:
-        if asset in ASSET_UNIVERSE and asset not in base:
-            base[asset] = 2
-    # normalize to 100
-    total = sum(base.values())
-    if total == 0:
-        return {k: round(100 / len(base), 2) for k in base}
-    return {k: round(v / total * 100, 2) for k, v in base.items()}
-
-# ---------------- Header (Lottie + Title) ----------------
-header_col1, header_col2 = st.columns([0.8, 3.2])
-with header_col1:
-    if STREAMLITE_LOTTIE_AVAILABLE and lottie_json:
-        st_lottie(lottie_json, height=110, key="lottie")
+# ---------------- Header ----------------
+h1, h2 = st.columns([0.7, 3.3])
+with h1:
+    if LOTTIE_OK and lottie_json:
+        try:
+            st_lottie(lottie_json, height=110, key="lottie")
+        except Exception:
+            st.image("https://raw.githubusercontent.com/nehamishra/fin-dashboard-assets/main/finance-neon.png", width=110)
     else:
-        # fallback: small inline SVG or title image placeholder
-        st.image("https://raw.githubusercontent.com/nehamishra/fin-dashboard-assets/main/finance-neon.png", width=120) if False else None
+        # minimal icon fallback (no external asset assumed)
+        st.markdown("<div style='width:110px;height:110px;background:linear-gradient(180deg,#00121a,#002b2b);border-radius:12px'></div>", unsafe_allow_html=True)
+with h2:
+    st.markdown("<div class='title'>AI Futuristic Asset Allocator — India</div>", unsafe_allow_html=True)
+    st.markdown("<div class='subtitle'>Live watchlist, custom allocation suggestions, goal planning, efficient frontier</div>", unsafe_allow_html=True)
 
-with header_col2:
-    st.markdown("<div class='title'>AI-Powered Futuristic Asset Allocation — India</div>", unsafe_allow_html=True)
-    st.markdown("<div class='subtitle'>Custom allocations, live Nifty tracker, robust goal planning, and neon analytics</div>", unsafe_allow_html=True)
 st.markdown("<div class='neon-divider'></div>", unsafe_allow_html=True)
 
-# ---------------- Navigation tabs ----------------
-tab1, tab2, tab3 = st.tabs(["🏦 Portfolio Allocation", "📈 Live Market Tracker", "🧮 Analytics & Goals"])
+# ---------------- Tabs ----------------
+tab1, tab2, tab3 = st.tabs(["🏦 Portfolio Allocation", "📡 Live Market (AI) Tracker", "🧮 Analytics & Goals"])
 
-# ---------------- Tab 1: Portfolio Allocation ----------------
+# ---------------- Tab 1: Portfolio Allocation (simplified) ----------------
 with tab1:
-    st.markdown("## Portfolio Allocation — custom inputs")
-    left, right = st.columns([1, 1.6])
+    st.markdown("## Portfolio Allocation — custom & editable")
+    c1, c2 = st.columns([1, 1.6])
 
-    with left:
+    with c1:
         st.markdown("### Inputs")
-        # allow user to add optional assets to include
-        optional_assets = st.multiselect("Add optional asset classes", options=ASSET_UNIVERSE, default=[])
-        # let user edit recommended horizon and goal
-        horizon = st.number_input("Your investment horizon (yrs)", min_value=1, max_value=50, value=horizon_default, step=1)
-        # quick risk note
-        st.markdown("<div class='small muted'>Tip: change risk appetite to see allocation tilt. All allocations are editable below.</div>", unsafe_allow_html=True)
+        optional_assets = st.multiselect("Optional asset classes to include", options=[
+            "Gold ETF / SGB", "REITs / InvITs", "International Equity", "Fixed Deposits", "Crypto (speculative)"
+        ], default=[])
+        horizon = st.number_input("Investment horizon (yrs)", min_value=1, max_value=50, value=horizon_default)
 
-        # generate allocation suggestion
-        suggestion = robo_allocation_custom(age, monthly_income, risk_label, include_optional=optional_assets)
+        # build suggestion (simple, transparent logic)
+        def robo_custom(age, income, risk_label, optional_assets):
+            base = {
+                "Large Cap Equity":30, "Mid/Small Cap Equity":10, "International Equity":5,
+                "Index ETFs":10, "Debt Funds":25, "Gold ETF / SGB":8, "REITs / InvITs":5, "Cash / Liquid":7
+            }
+            risk_map = {"Very Low": -15, "Low": -7, "Moderate": 0, "High": 7, "Very High": 15}
+            tilt = risk_map.get(risk_label,0)
+            base["Large Cap Equity"] = max(0, base["Large Cap Equity"] + int(tilt*0.5))
+            base["Mid/Small Cap Equity"] = max(0, base["Mid/Small Cap Equity"] + int(tilt*0.3))
+            base["Debt Funds"] = max(0, base["Debt Funds"] - int(tilt*0.6))
+            if age < 35:
+                base["Mid/Small Cap Equity"] += 5
+                base["Debt Funds"] = max(0, base["Debt Funds"] - 5)
+            elif age > 60:
+                base["Debt Funds"] += 7
+                base["Large Cap Equity"] = max(0, base["Large Cap Equity"] - 7)
+            if income > 150000:
+                base["International Equity"] += 3
+            for a in optional_assets:
+                if a not in base:
+                    base[a] = 2
+            total = sum(base.values())
+            return {k: round(v/total*100,2) for k,v in base.items()}
+
+        suggestion = robo_custom(age, monthly_income, risk_label, optional_assets)
         suggestion_df = pd.DataFrame({"Asset Class": list(suggestion.keys()), "Allocation (%)": list(suggestion.values())})
         st.markdown("### Suggested allocation (editable)")
         edited_alloc = st.data_editor(suggestion_df, num_rows="dynamic", use_container_width=True)
-        # normalize if necessary
+
+    with c2:
+        st.markdown("### Quick metrics & logic")
         if "Allocation (%)" in edited_alloc.columns:
-            total_allocation = float(edited_alloc["Allocation (%)"].sum())
-            if abs(total_allocation - 100) > 0.5:
-                st.warning("Total allocation not ~100%. Edit values to sum close to 100% or re-balance.")
-        else:
-            st.info("Edit allocation table to set percentages.")
+            total_alloc = edited_alloc["Allocation (%)"].sum()
+            if abs(total_alloc - 100) > 0.5:
+                st.warning("Allocation does not sum to 100% — adjust the table or rebalance.")
+        # show short logic box
+        st.markdown("<div class='card'><b>Logic for selection</b><div class='small'>Allocation is a function of age, income, and risk preferences. Equity bias rises with lower age and higher risk appetite; debt and cash act as shock absorbers for income and retirement horizons.</div></div>", unsafe_allow_html=True)
 
-    with right:
-        st.markdown("### Portfolio quick metrics")
-        # compute blended returns & vol using defaults or live blend
-        alloc_df = edited_alloc.copy()
-        if "Allocation (%)" not in alloc_df.columns:
-            alloc_df["Allocation (%)"] = 0
-        # try to blend with live series if available
-        asset_returns = {}
-        asset_vols = {}
-        for a in alloc_df["Asset Class"]:
-            t = DEFAULT_TICKERS.get(a)
-            series = fetch_close_series(t, years=lookback_years) if t else None
-            if series is not None:
-                c, v = compute_cagr_and_vol(series)
-                if c is not None:
-                    asset_returns[a] = 0.7 * c + 0.3 * DEFAULT_RETURNS.get(a, 0.06)
-                    asset_vols[a] = 0.7 * v + 0.3 * DEFAULT_VOL.get(a, 0.15)
-                else:
-                    asset_returns[a] = DEFAULT_RETURNS.get(a, 0.06)
-                    asset_vols[a] = DEFAULT_VOL.get(a, 0.15)
-            else:
-                asset_returns[a] = DEFAULT_RETURNS.get(a, 0.06)
-                asset_vols[a] = DEFAULT_VOL.get(a, 0.15)
-
-        alloc_df["Exp Return (%)"] = alloc_df["Asset Class"].map(lambda x: asset_returns.get(x, 0.06) * 100)
-        alloc_df["Volatility (%)"] = alloc_df["Asset Class"].map(lambda x: asset_vols.get(x, 0.15) * 100)
-        alloc_df["Allocation (₹)"] = alloc_df["Allocation (%)"] / 100.0 * invest_now
-
-        st.dataframe(alloc_df.style.format({"Allocation (%)":"{:.2f}", "Allocation (₹)":"₹{:,.0f}", "Exp Return (%)":"{:.2f}%", "Volatility (%)":"{:.2f}%"}), use_container_width=True)
-
-        # portfolio level metrics
-        w = np.array(alloc_df["Allocation (%)"] / 100.0, dtype=float)
-        means = np.array([asset_returns[a] for a in alloc_df["Asset Class"]], dtype=float)
-        vols = np.array([asset_vols[a] for a in alloc_df["Asset Class"]], dtype=float)
-        cov = np.outer(vols, vols) * 0.25
-        np.fill_diagonal(cov, vols ** 2)
-        port_ret = float(np.dot(w, means)) if len(w) > 0 else 0.0
-        port_vol = float(np.sqrt(np.dot(w, np.dot(cov, w)))) if len(w) > 0 else 0.0
-
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Est. annual return", f"{port_ret*100:.2f}%")
-        m2.metric("Est. volatility (σ)", f"{port_vol*100:.2f}%")
-        det_future = deterministic_portfolio_fv = 0  # placeholder for small note
-        # small narrative box
-        st.markdown("<div class='card'><b>Logic for selection</b><br><div class='small muted'>Allocation is tilted using age & income. Equity allocations favor long horizons and younger investors; debt allocations increase with lower risk preference and older age.</div></div>", unsafe_allow_html=True)
-
-    st.markdown("### Visual: Allocation (glow pie)")
-    fig_p = px.pie(alloc_df, names="Asset Class", values="Allocation (%)", hole=0.36)
-    fig_p.update_traces(textinfo="percent+label")
-    fig_p.update_layout(paper_bgcolor="rgba(0,0,0,0)", font=dict(color="white"), legend=dict(orientation="h"))
-    st.plotly_chart(fig_p, use_container_width=True)
-
-    # Download allocation
-    csv_bytes = alloc_df.to_csv(index=False).encode("utf-8")
-    st.download_button("Download allocation CSV", data=csv_bytes, file_name="allocation.csv", mime="text/csv")
-
-# ---------------- Tab 2: Live Market Tracker ----------------
-with tab2:
-    st.markdown("## Live Market Tracker — Nifty & sample tickers (auto-updates every 5 mins)")
-    # Nifty index
-    nifty_ticker = "^NSEI"  # Nifty 50
-    nifty_series = fetch_close_series(nifty_ticker, years=lookback_years)
-    if nifty_series is not None:
-        norm = nifty_series / nifty_series.iloc[0] * 100
-        df_norm = pd.DataFrame({"Date": norm.index, "Index": norm.values})
-        fig = px.line(df_norm, x="Date", y="Index", title=f"Nifty (last {lookback_years} yrs normalized)")
-        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", font=dict(color="white"))
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("Nifty data not available — Yahoo may block some index tickers.")
-
-    st.markdown("### Live sample tickers (prices updated automatically)")
-    sample_tickers = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS", "GOLDBEES.NS"]
+    st.markdown("### Allocation visual")
     try:
-        prices = yf.download(sample_tickers, period="10d", interval="1d")["Close"]
-        if not prices.empty:
-            latest = prices.iloc[-1]
-            table = pd.DataFrame({"Ticker": latest.index, "Latest": latest.values})
-            table["Latest"] = table["Latest"].map(lambda x: f"{x:,.2f}")
-            st.dataframe(table, use_container_width=True)
-        else:
-            st.info("No recent tickers data.")
+        fig_p = px.pie(edited_alloc, names="Asset Class", values="Allocation (%)", hole=0.36)
+        fig_p.update_layout(paper_bgcolor="rgba(0,0,0,0)", font=dict(color="white"))
+        st.plotly_chart(fig_p, use_container_width=True)
     except Exception:
-        st.info("Live tickers not available at the moment (Yahoo fetch issue).")
+        st.info("Allocation chart unavailable (check the allocation table).")
+
+    # allow download
+    try:
+        csv = edited_alloc.to_csv(index=False).encode("utf-8")
+        st.download_button("Download allocation CSV", csv, file_name="allocation.csv", mime="text/csv")
+    except Exception:
+        pass
+
+# ---------------- Tab 2: Live Market (AI) Tracker — new AI-futuristic market UI ----------------
+with tab2:
+    st.markdown("## 📡 Live Market Tracker — AI-futuristic (auto-refresh every 5 minutes)")
+    st.markdown("<div class='small'>Neon ticker, sparkline cards, and detailed table. Add / remove tickers in the watchlist below.</div>", unsafe_allow_html=True)
+    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
+    # Watchlist editor
+    st.markdown("### Watchlist (editable & persistent)")
+    wl_col1, wl_col2 = st.columns([3,1])
+    with wl_col1:
+        # show editable watchlist (data editor)
+        wl_df = pd.DataFrame({"Ticker": st.session_state.watchlist})
+        wl_df = st.data_editor(wl_df, num_rows="dynamic", use_container_width=True)
+        # coerce to session state
+        new_watch = [str(x).strip() for x in wl_df["Ticker"].tolist() if str(x).strip() != ""]
+        if new_watch != st.session_state.watchlist:
+            st.session_state.watchlist = new_watch
+    with wl_col2:
+        st.markdown("<div style='display:flex;flex-direction:column;gap:6px'>"
+                    "<button id='add_default' style='padding:6px;border-radius:8px;background:#00121a;color:#00e5ff;border:0'>Add Nifty</button>"
+                    "</div>", unsafe_allow_html=True)
+
+    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
+    # Build marquee strip
+    WATCHLIST = st.session_state.watchlist.copy()
+    # Ensure Nifty presence optionally (local). Keep '^NSEI' optional: Yahoo index may be blocked.
+    if "^NSEI" not in WATCHLIST and len(WATCHLIST) < 10:
+        WATCHLIST.insert(0, "RELIANCE.NS")  # ensure at least one Indian name
+
+    # Fetch latest and short series for each ticker (defensive)
+    strip_items = []
+    detailed_rows = []
+    for t in WATCHLIST:
+        # try last 7 days for sparkline & last two closes for % change
+        series = fetch_close(t, period="14d", interval="1d")
+        if series is None or series.empty:
+            strip_items.append((t, None, None))
+            detailed_rows.append({"Ticker": t, "Last Close": None, "Pct Change": None, "Status": "No data"})
+            continue
+        last = float(series.iloc[-1])
+        prev = float(series.iloc[-2]) if len(series) >= 2 else last
+        pct = (last - prev) / prev * 100 if prev != 0 else 0.0
+        strip_items.append((t, last, pct))
+        detailed_rows.append({"Ticker": t, "Last Close": last, "Pct Change": pct, "Status": "OK", "Series": series.tail(7)})
+
+    # marquee html
+    marquee_parts = []
+    for t, price, pct in strip_items:
+        if price is None:
+            marquee_parts.append(f"<span style='padding:0 18px;color:#6C7A89'>{t}: —</span>")
+        else:
+            color = "#26FFE6" if pct >= 0 else "#FF6B6B"
+            marquee_parts.append(f"<span style='padding:0 18px;color:{color}; font-weight:600'>{t}: {price:,.2f} ({pct:+.2f}%)</span>")
+    marquee_html = "<div class='ticker-slab marquee'><div class='marquee-inner'>" + " &#160; &#160; ".join(marquee_parts) + "</div></div>"
+    st.markdown(marquee_html, unsafe_allow_html=True)
+
+    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+
+    # Show sparkline cards in a responsive grid
+    if strip_items:
+        cols = st.columns(min(len(strip_items), 6))
+        for i, (t, price, pct) in enumerate(strip_items):
+            col = cols[i % len(cols)]
+            with col:
+                if price is None:
+                    col.markdown(f"<div class='card' style='text-align:center'><div class='small'>{t}</div><div style='font-size:18px;color:#6C7A89'>No data</div></div>", unsafe_allow_html=True)
+                    continue
+                color = "#26FFE6" if pct >= 0 else "#FF6B6B"
+                col.markdown(f"<div class='card' style='text-align:center'><div class='small'>{t}</div><div style='font-weight:700;color:{color};font-size:18px'>{price:,.2f}</div><div class='small' style='color:{color}'>{pct:+.2f}%</div></div>", unsafe_allow_html=True)
+                # sparkline
+                # find the corresponding series
+                series = None
+                for row in detailed_rows:
+                    if row["Ticker"] == t and row.get("Series") is not None:
+                        series = row["Series"]
+                        break
+                if series is not None and len(series) >= 3:
+                    sp_df = pd.DataFrame({"x": series.index, "y": series.values})
+                    fig_sp = px.line(sp_df, x="x", y="y", height=90)
+                    fig_sp.update_traces(line=dict(color=color, width=2), hoverinfo="skip")
+                    fig_sp.update_layout(margin=dict(l=0,r=0,t=0,b=0), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", xaxis=dict(visible=False), yaxis=dict(visible=False))
+                    st.plotly_chart(fig_sp, use_container_width=True)
+                else:
+                    st.markdown("<div style='height:90px'></div>", unsafe_allow_html=True)
+
+    st.markdown("---")
+    # Detailed table
+    detail_df = pd.DataFrame([{"Ticker": r["Ticker"], "Last Close": (fmt_inr(r["Last Close"]) if r["Last Close"] else "—"), "Pct Change": (f"{r['Pct Change']:+.2f}%" if r["Pct Change"] is not None else "—"), "Status": r["Status"]} for r in detailed_rows])
+    st.table(detail_df)
+
+    # note about unavailable tickers
+    missing = [r["Ticker"] for r in detailed_rows if r["Status"] != "OK"]
+    if missing:
+        st.warning("Some tickers returned no data. Yahoo may block certain index tickers like ^NSEI; add individual stocks/ETFs instead.")
 
 # ---------------- Tab 3: Analytics & Goals ----------------
 with tab3:
-    st.markdown("## Analytics & Goals")
-    colA, colB = st.columns([1.4, 1])
+    st.markdown("## Analytics & Goals — projections & Monte Carlo")
+    colL, colR = st.columns([1.6, 1])
 
-    with colA:
-        st.markdown("### Goal Planner — create multiple goals (editable)")
+    with colL:
+        st.markdown("### Goals — create and simulate")
         if "goals" not in st.session_state:
-            st.session_state.goals = [{"name": "Retirement", "amount": 5000000, "years": 20},
-                                      {"name": "Child Education", "amount": 2000000, "years": 10}]
+            st.session_state.goals = [{"name":"Retirement","amount":5000000,"years":20},{"name":"Home","amount":3000000,"years":8}]
         goals_df = pd.DataFrame(st.session_state.goals)
         edited_goals = st.data_editor(goals_df, num_rows="dynamic", use_container_width=True)
 
-        # robust cleaning with progress and corrections log
+        # robust cleaning of goals
         rows = edited_goals.to_dict(orient="records")
-        corrected = []
         cleaned = []
-        total = max(1, len(rows))
-        prog = st.progress(0)
+        corrections = []
         for i, r in enumerate(rows):
-            # ensure dict
             if not isinstance(r, dict):
                 try:
                     r = dict(r)
                 except Exception:
                     r = {}
-            name = r.get("name") or r.get("Goal") or "Goal"
+            name = r.get("name") or r.get("Goal") or f"Goal {i+1}"
             # amount
-            amt_raw = r.get("amount") or r.get("Target Amount (₹)") or 0
             try:
-                amt = float(amt_raw)
+                amt = float(r.get("amount", 0) or 0)
             except Exception:
-                cleaned_amt = ''.join(ch for ch in str(amt_raw) if (ch.isdigit() or ch == '.'))
+                cleaned_amt = ''.join(ch for ch in str(r.get("amount","")) if (ch.isdigit() or ch=='.'))
                 amt = float(cleaned_amt) if cleaned_amt else 0.0
-                corrected.append((i + 1, str(amt_raw), str(amt)))
+                corrections.append((i+1, r.get("amount"), amt))
             # years
             try:
                 val = r.get("years") or r.get("Years") or 0
-                if isinstance(val, (int, float)):
+                if isinstance(val, (int,float)):
                     yrs = int(val)
                 elif isinstance(val, str):
-                    cleaned_yrs = ''.join(ch for ch in val if (ch.isdigit() or ch == '.'))
+                    cleaned_yrs = ''.join(ch for ch in val if (ch.isdigit() or ch=='.'))
                     yrs = int(float(cleaned_yrs)) if cleaned_yrs else 0
                     if cleaned_yrs != val:
-                        corrected.append((i + 1, str(val), str(yrs)))
+                        corrections.append((i+1, val, yrs))
                 else:
                     yrs = 0
             except Exception:
                 yrs = 0
-                corrected.append((i + 1, str(r.get("years", r.get("Years", ""))), "0"))
-            cleaned.append({"name": name, "amount": amt, "years": yrs})
-            prog.progress((i + 1) / total)
-            time.sleep(0.01)
-        prog.empty()
+                corrections.append((i+1, r.get("years"), 0))
+            cleaned.append({"name":name,"amount":amt,"years":yrs})
         st.session_state.goals = cleaned
 
-        if corrected:
-            with st.expander("⚠️ Auto-corrections (Goals)"):
-                for row_i, old_v, new_v in corrected:
-                    st.markdown(f"- Row **{row_i}**: `{old_v}` → `{new_v}`")
-            st.success("Goal inputs cleaned automatically.")
+        if corrections:
+            with st.expander("Auto-corrections applied"):
+                for idx, old, new in corrections:
+                    st.markdown(f"- Row **{idx}**: `{old}` → `{new}`")
+            st.success("Goal inputs cleaned.")
 
-        st.markdown("### Run Monte Carlo per goal (uses current allocation suggestion)")
-        run_button = st.button("Run goal simulations")
-        if run_button:
-            # compute weights from current suggestion in tab1 (if exists), else from robo default
+        if st.button("Run Monte Carlo for goals"):
+            # get allocation weights from earlier edited_alloc if present
             try:
-                weights_df = edited_alloc.copy() if 'edited_alloc' in locals() else None
+                weights_df = edited_alloc.copy()
+                if "Allocation (%)" not in weights_df:
+                    raise Exception
             except Exception:
-                weights_df = None
-            if weights_df is None or "Allocation (%)" not in weights_df.columns:
-                weights = robo_allocation_custom(age, monthly_income, risk_label, optional_assets)
-                weights_df = pd.DataFrame({"Asset Class": list(weights.keys()), "Allocation (%)": list(weights.values())})
-            w = np.array(weights_df["Allocation (%)"] / 100.0, dtype=float)
-            means = np.array([DEFAULT_RETURNS.get(a, 0.06) for a in weights_df["Asset Class"]], dtype=float)
-            vols = np.array([DEFAULT_VOL.get(a, 0.15) for a in weights_df["Asset Class"]], dtype=float)
+                # fallback to robo suggestion
+                weights_df = pd.DataFrame({"Asset Class": list(robo_custom(age, monthly_income, risk_label, optional_assets).keys()), "Allocation (%)": list(robo_custom(age, monthly_income, risk_label, optional_assets).values())})
+
+            w = np.array(weights_df["Allocation (%)"]/100.0, dtype=float)
+            # use default returns & vol mapping for asset classes
+            default_returns = { # conservative defaults (annual)
+                "Large Cap Equity":0.10,"Mid/Small Cap Equity":0.13,"International Equity":0.08,"Index ETFs":0.095,
+                "Debt Funds":0.06,"Gold ETF / SGB":0.07,"REITs / InvITs":0.08,"Cash / Liquid":0.035
+            }
+            means = np.array([default_returns.get(a,0.06) for a in weights_df["Asset Class"]], dtype=float)
+            vols = np.array([0.18 if "Equity" in a else 0.08 for a in weights_df["Asset Class"]], dtype=float)
             cov = np.outer(vols, vols) * 0.25
-            np.fill_diagonal(cov, vols ** 2)
+            np.fill_diagonal(cov, vols**2)
 
-            out = []
+            results = []
             for g in st.session_state.goals:
-                yrs = int(float(g.get("years", 10)))
-                sims_goal = max(300, int(mc_sims / 4))
-                mc_goal = monte_carlo_sim(invest_now, sip_now, w, means, cov, yrs, sims_goal)
-                prob = float((mc_goal >= g["amount"]).sum() / len(mc_goal) * 100.0)
-                out.append({"Goal": g["name"], "Target (₹)": int(g["amount"]), "Years": yrs, "P(achieve %)": round(prob, 1), "Median end (₹)": int(np.median(mc_goal))})
-            out_df = pd.DataFrame(out)
-            st.dataframe(out_df, use_container_width=True)
-            st.plotly_chart(px.bar(out_df, x="Goal", y="P(achieve %)", text="P(achieve %)"), use_container_width=True)
-            csv_out = out_df.to_csv(index=False).encode("utf-8")
-            st.download_button("Download goal simulation results CSV", csv_out, file_name="goal_simulations.csv", mime="text/csv")
+                yrs = int(float(g.get("years",10)))
+                sims = max(300, int(mc_sims/3))
+                mc = monte_carlo_sim = None
+                # run MC (simple annual correlated returns)
+                # reuse cache function pattern locally to avoid redefinition
+                def run_mc(invest, sip, w, means, cov, yrs, sims):
+                    yrs = int(yrs)
+                    sims = int(sims)
+                    w = np.array(w, dtype=float)
+                    means = np.array(means, dtype=float)
+                    cov = np.array(cov, dtype=float)
+                    n = len(w)
+                    cov = cov + np.eye(n)*1e-10
+                    L = np.linalg.cholesky(cov)
+                    rng = np.random.default_rng(42)
+                    finals = np.zeros(sims)
+                    annual_sip = float(sip)*12.0
+                    base = w * invest
+                    for s in range(sims):
+                        vals = base.copy()
+                        for y in range(yrs):
+                            z = rng.normal(size=n)
+                            ret = means + L @ z
+                            vals = vals * (1 + ret)
+                            if annual_sip>0:
+                                vals = vals + annual_sip * w
+                        finals[s] = vals.sum()
+                    return finals
+                mc = run_mc(invest_now, sip_now, w, means, cov, yrs, sims)
+                prob = float((mc >= g["amount"]).sum() / len(mc) * 100.0)
+                results.append({"Goal":g["name"], "Target (₹)": int(g["amount"]), "Years":yrs, "P(achieve %)": round(prob,1), "Median end (₹)": int(np.median(mc))})
+            res_df = pd.DataFrame(results)
+            st.dataframe(res_df, use_container_width=True)
+            st.plotly_chart(px.bar(res_df, x="Goal", y="P(achieve %)", text="P(achieve %)"), use_container_width=True)
+            st.download_button("Download goal results CSV", res_df.to_csv(index=False).encode("utf-8"), "goal_results.csv", mime="text/csv")
 
-    with colB:
-        st.markdown("### Quick analytics")
-        # small sample: portfolio expected return & volatility from default robo allocation
-        default_alloc = robo_allocation_custom(age, monthly_income, risk_label)
-        df_def = pd.DataFrame({"Asset Class": list(default_alloc.keys()), "Allocation (%)": list(default_alloc.values())})
-        w_def = np.array(df_def["Allocation (%)"] / 100.0, dtype=float)
-        means_def = np.array([DEFAULT_RETURNS.get(a, 0.06) for a in df_def["Asset Class"]], dtype=float)
-        vols_def = np.array([DEFAULT_VOL.get(a, 0.15) for a in df_def["Asset Class"]], dtype=float)
-        cov_def = np.outer(vols_def, vols_def) * 0.25
-        np.fill_diagonal(cov_def, vols_def ** 2)
-        p_ret = float(np.dot(w_def, means_def))
-        p_vol = float(np.sqrt(w_def @ cov_def @ w_def))
-        p_sharpe = (p_ret - 0.04) / (p_vol + 1e-9)
-        st.markdown("<div class='card'><b>Portfolio snapshot (suggested)</b><br><div class='muted'>Expected return | Volatility | Sharpe-like</div></div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='metric'><div class='metric-val'>{p_ret*100:.2f}%</div><div class='small muted'>Expected return</div></div>", unsafe_allow_html=True)
-        st.markdown(f"<div style='height:6px'></div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='metric'><div class='metric-val'>{p_vol*100:.2f}%</div><div class='small muted'>Volatility (σ)</div></div>", unsafe_allow_html=True)
-        st.markdown(f"<div style='height:6px'></div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='metric'><div class='metric-val'>{p_sharpe:.2f}</div><div class='small muted'>Sharpe-like</div></div>", unsafe_allow_html=True)
+    with colR:
+        st.markdown("### Snapshot — suggested allocation metrics")
+        # create a preview of suggested robo allocation
+        preview = robo_custom(age, monthly_income, risk_label, optional_assets)
+        df_preview = pd.DataFrame({"Asset Class": list(preview.keys()), "Allocation (%)": list(preview.values())})
+        w_pre = np.array(df_preview["Allocation (%)"]/100.0, dtype=float)
+        means_pre = np.array([0.09 if "Equity" in a else 0.05 for a in df_preview["Asset Class"]], dtype=float)
+        vols_pre = np.array([0.18 if "Equity" in a else 0.08 for a in df_preview["Asset Class"]], dtype=float)
+        cov_pre = np.outer(vols_pre, vols_pre)*0.25
+        np.fill_diagonal(cov_pre, vols_pre**2)
+        p_ret = float(np.dot(w_pre, means_pre))
+        p_vol = float(np.sqrt(w_pre @ cov_pre @ w_pre))
+        st.markdown(f"<div class='card'><b>Exp. return</b><div style='font-size:18px;color:#26ffe6'>{p_ret*100:.2f}%</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='height:8px'></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='card'><b>Volatility (σ)</b><div style='font-size:18px;color:#ffd166'>{p_vol*100:.2f}%</div></div>", unsafe_allow_html=True)
 
 # ---------------- Footer ----------------
 st.markdown("<hr style='border:1px solid rgba(255,255,255,0.04)'>", unsafe_allow_html=True)
-st.markdown("<div style='text-align:center; color:#9FB4C8; font-size:13px;'>Made for you — futuristic Indian asset allocation tool. Not financial advice.</div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center;color:#9FB4C8'>Built for Indian investors — educational tool. Not financial advice.</div>", unsafe_allow_html=True)
