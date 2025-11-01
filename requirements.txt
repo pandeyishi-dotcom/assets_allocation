@@ -3,3 +3,6 @@ pandas==2.2.3
 numpy==2.1.2
 plotly==5.20.0
 yfinance==0.2.21
+requests==2.31.0
+streamlit-lottie==0.0.7
+openpyxl==3.1.2
