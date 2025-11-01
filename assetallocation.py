@@ -253,7 +253,7 @@ elif nav == "Live Market":
         colA.subheader("✅ Market Live")
         colA.metric("NIFTY 50", f"₹{latest_price:,.2f}", f"{pct:+.2f}%")
     if len(nifty_df) >= 2:
-        colB.metric("Recent Δ (pts)", f"{change:+.2f}")
+        # Calculate change before displaying latest = nifty["Close"].iloc[-1] previous = nifty["Close"].iloc[-2] if len(nifty) > 1 else latest change = latest - previous percent_change = (change / previous) * 100 if previous != 0 else 0  colA.metric("Current NIFTY", f"{latest:.2f}") colB.metric("Recent Δ (pts)", f"{change:+.2f}") colC.metric("Δ (%)", f"{percent_change:+.2f}%")
 
     st.markdown("### Intraday / Recent movement")
     try:
