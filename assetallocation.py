@@ -1,6 +1,5 @@
-# assetallocation_full.py
-# AI-Driven Fintech Cockpit (full integrated app)
-# Run: streamlit run assetallocation_full.py
+# assetallocation_fixed.py
+# Full fintech cockpit (fixed plotting + safe data editor)
 # Requirements: streamlit, yfinance, pandas, numpy, plotly, pytz
 
 import streamlit as st
@@ -8,15 +7,13 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.express as px
-import plotly.graph_objects as go
-from datetime import datetime, date
-import pytz
+from datetime import date
 from io import StringIO
 
 # -------------------------
 # Page config & theme
 # -------------------------
-st.set_page_config(page_title="AI Portfolio Cockpit — Full", layout="wide", page_icon="💠")
+st.set_page_config(page_title="AI Portfolio Cockpit — Fixed", layout="wide", page_icon="💠")
 ACCENT = "#00FFC6"
 BG = "#0e1117"
 CARD = "#0f1720"
@@ -32,14 +29,13 @@ st.markdown(
       .card{{ background:{CARD}; padding:12px; border-radius:10px; }}
       .smallpill{{ font-size:12px; color:#cfeee6; background:#07121a; padding:6px 10px;border-radius:6px;}}
       .footer{{ color: {MUTED}; font-size:12px; }}
-      .stMetricDelta {{}}
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 # -------------------------
-# Utilities & caching
+# Utility functions
 # -------------------------
 @st.cache_data(ttl=300)
 def fetch_symbol(symbol, period="5d", interval="15m"):
@@ -95,11 +91,12 @@ def compute_portfolio_value(df_holdings):
     if "BuyPrice" in df.columns:
         df["Cost"] = df["BuyPrice"] * df["Quantity"]
         df["P&L"] = df["Value"] - df["Cost"]
-        df["P&L %"] = df["P&L"] / df["Cost"] * 100
+        # avoid division by zero
+        df["P&L %"] = np.where(df["Cost"] != 0, df["P&L"] / df["Cost"] * 100, np.nan)
     return df
 
 def suggest_allocation(age, risk_level, horizon_years):
-    """Rule-based allocation suggestion (explainable)"""
+    """Simple rule-based allocation advice"""
     base_equity = 60
     if age >= 60:
         base_equity = 30
@@ -125,7 +122,6 @@ def suggest_allocation(age, risk_level, horizon_years):
     gold = int(round(equity * 0.08))
     reits = 5
     cash = 5
-    # Build 15+ classes (distribute debt into sub-classes)
     allocation = {
         "Large-cap Equity": int(round(equity * 0.45)),
         "Mid/Small-cap Equity": int(round(equity * 0.25)),
@@ -143,16 +139,13 @@ def suggest_allocation(age, risk_level, horizon_years):
         "Short-term Bonds": 0,
         "Others": 0
     }
-    # normalize to 100
     tot = sum(allocation.values())
     if tot == 0:
-        # fallback balanced
         for k in allocation:
             allocation[k] = int(round(100/len(allocation)))
     else:
         for k in allocation:
             allocation[k] = int(round(allocation[k] * 100 / tot))
-    # final adjust
     diff = 100 - sum(allocation.values())
     allocation["Cash/Liquid"] += diff
     rationale = f"Rule-of-thumb allocation based on age {age}, risk {risk_level}, horizon {horizon_years}y."
@@ -176,9 +169,7 @@ with st.sidebar:
     st.title("AI Portfolio Cockpit")
     nav = st.radio("Navigate", ["Home", "Live Market", "Market Pulse", "Portfolio", "Asset Allocation", "Allocation Advisor", "Goals & SIP", "Sector Heatmap", "Watchlist"], index=1)
     st.markdown("---")
-    st.markdown("Settings")
-    cache_minutes = st.number_input("Cache (sec)", 60, 1800, 300, step=60)
-    st.caption("Data cached to reduce rate-limits. Increase if you hit API limits.")
+    st.caption("Built for Indian markets • Auto-fallbacks included")
 
 # -------------------------
 # Home
@@ -237,11 +228,23 @@ elif nav == "Live Market":
         reason = reason or "no data"
     st.caption(f"Mode: {mode} — {reason}")
 
-    latest = float(nifty_df["Close"].iloc[-1])
-    previous = float(nifty_df["Close"].iloc[-2]) if len(nifty_df) > 1 else latest
+    # compute latest/previous safely
+    # if 'Close' exists, use it; else pick first numeric column
+    if "Close" in nifty_df.columns:
+        series_to_plot = nifty_df["Close"]
+    else:
+        numeric_cols = nifty_df.select_dtypes(include=[np.number]).columns
+        if len(numeric_cols) > 0:
+            series_to_plot = nifty_df[numeric_cols[0]]
+        else:
+            # as ultimate fallback, convert first column to numeric
+            series_to_plot = pd.to_numeric(nifty_df.iloc[:, 0], errors="coerce")
+
+    latest = float(series_to_plot.iloc[-1])
+    previous = float(series_to_plot.iloc[-2]) if len(series_to_plot) > 1 else latest
     change = latest - previous
     pct = (change / previous) * 100 if previous != 0 else 0.0
-    last_date = pd.to_datetime(nifty_df.index[-1]).date()
+    last_date = pd.to_datetime(series_to_plot.index[-1]).date()
     today = date.today()
 
     colA, colB, colC = st.columns(3)
@@ -255,13 +258,22 @@ elif nav == "Live Market":
     colC.metric("Δ (%)", f"{pct:+.2f}%")
 
     st.markdown("### Price movement (recent)")
+    # use series_to_plot for plotting to avoid MultiIndex issues
     try:
-        st.line_chart(nifty_df["Close"].rename("Close"), use_container_width=True)
+        st.line_chart(series_to_plot.rename("Price"), use_container_width=True)
     except Exception:
-        st.line_chart(nifty_df.iloc[:, 0], use_container_width=True)
+        # final fallback: convert DataFrame to single series
+        try:
+            st.line_chart(pd.to_numeric(nifty_df.iloc[:, 0], errors="coerce"), use_container_width=True)
+        except Exception:
+            st.write("Chart unavailable.")
 
     st.markdown("### Recent data")
-    st.dataframe(nifty_df.tail(10).round(2), use_container_width=True)
+    # show dataframe safely
+    try:
+        st.dataframe(nifty_df.tail(10).round(2), use_container_width=True)
+    except Exception:
+        st.write(nifty_df.tail(10))
 
 # -------------------------
 # Portfolio upload & analysis
@@ -279,7 +291,6 @@ elif nav == "Portfolio":
             elif raw.shape[1] >= 3:
                 raw = raw.iloc[:, :3]
                 raw.columns = ["Symbol", "Quantity", "BuyPrice"]
-            # cast
             raw["Symbol"] = raw["Symbol"].astype(str).str.strip().str.upper()
             raw["Quantity"] = raw["Quantity"].astype(float)
             if "BuyPrice" in raw.columns:
@@ -295,7 +306,6 @@ elif nav == "Portfolio":
             c1.metric("Total Market Value", f"₹{total_value:,.2f}")
             c2.metric("Total P&L", f"₹{pnl:,.2f}" if not np.isnan(pnl) else "N/A")
             c3.metric("Tickers", df_hold["Symbol"].nunique())
-            # allocation visualization
             alloc = df_hold.groupby("Symbol")["Value"].sum().reset_index()
             fig = px.pie(alloc, names="Symbol", values="Value", title="Portfolio Allocation", color_discrete_sequence=px.colors.sequential.Tealgrn)
             st.plotly_chart(fig, use_container_width=True)
@@ -305,12 +315,11 @@ elif nav == "Portfolio":
         st.info("Upload a portfolio CSV to compute current value and allocation.")
 
 # -------------------------
-# Asset Allocation (15+ classes, toggles)
+# Asset Allocation (simplified UI)
 # -------------------------
 elif nav == "Asset Allocation":
     st.markdown(f"<div class='titlebig'>Asset Allocation Builder</div>", unsafe_allow_html=True)
-    st.markdown("Select asset classes (legal in India) and use automatic allocation or set your own weights. At least one must be selected.")
-
+    st.markdown("Minimal allocation UI (auto-suggest + manual edit).")
     asset_classes = [
         "Large-cap Equity", "Mid/Small-cap Equity", "International Equity",
         "Debt — Govt", "Debt — Corporate", "Short-term Bonds",
@@ -332,46 +341,45 @@ elif nav == "Asset Allocation":
         submitted = st.form_submit_button("Suggest allocation")
     if submitted:
         alloc_map, rationale = suggest_allocation(age, risk, horizon)
-        # filter to selected
-        alloc_display = {k: v for k, v in alloc_map.items() if k in selected}
-        if len(alloc_display) == 0:
-            st.warning("No matching selected asset classes for the auto-suggestion. Showing full suggestion.")
-            alloc_display = alloc_map
+        alloc_display = {k: v for k, v in alloc_map.items() if k in selected} or alloc_map
         df_alloc = pd.DataFrame(list(alloc_display.items()), columns=["Asset Class", "Allocation %"])
-        # normalize if needed
         total = df_alloc["Allocation %"].sum()
-        if total != 100:
-            df_alloc["Allocation %"] = (df_alloc["Allocation %"] / df_alloc["Allocation %"].sum() * 100).round(0)
+        if total != 100 and total > 0:
+            df_alloc["Allocation %"] = (df_alloc["Allocation %"] / total * 100).round(0)
             diff = 100 - df_alloc["Allocation %"].sum()
             df_alloc.loc[df_alloc.index[0], "Allocation %"] += diff
         st.dataframe(df_alloc, use_container_width=True)
         fig = px.pie(df_alloc, names="Asset Class", values="Allocation %", title="Suggested Allocation", color_discrete_sequence=px.colors.sequential.Tealgrn)
         st.plotly_chart(fig, use_container_width=True)
-        st.markdown("**Rationale:**")
         st.write(rationale)
-        st.success("Auto-suggested allocation created. You can edit weights below.")
 
-    st.markdown("### Manual edit (drag to adjust) — ensure total = 100")
-    # start from default balanced if none suggested
+    st.markdown("### Manual edit (if editor is available)")
     default_df = pd.DataFrame({"Asset Class": selected or asset_classes, "Allocation %": [round(100/len(selected or asset_classes), 0)]*(len(selected or asset_classes))})
-    edited = st.experimental_data_editor(default_df, num_rows="dynamic")
-    if st.button("Normalize to 100"):
-        s = edited["Allocation %"].sum()
-        if s == 0:
-            st.error("Sum is 0 — adjust values.")
-        else:
-            edited["Allocation %"] = (edited["Allocation %"] / s * 100).round(0)
-            diff = 100 - edited["Allocation %"].sum()
-            edited.at[0, "Allocation %"] += diff
-            st.success("Normalized to 100%")
-            st.dataframe(edited, use_container_width=True)
+
+    # use experimental_data_editor if available, else fallback to static table + input
+    try:
+        edited = st.experimental_data_editor(default_df)
+        # 'Normalize to 100' button to fix sums
+        if st.button("Normalize to 100"):
+            s = edited["Allocation %"].sum()
+            if s == 0:
+                st.error("Sum is 0 — adjust values.")
+            else:
+                edited["Allocation %"] = (edited["Allocation %"] / s * 100).round(0)
+                diff = 100 - edited["Allocation %"].sum()
+                edited.at[0, "Allocation %"] += diff
+                st.success("Normalized to 100%")
+                st.dataframe(edited, use_container_width=True)
+    except Exception:
+        st.warning("Interactive data editor not available in this Streamlit runtime. Showing static table.")
+        st.dataframe(default_df, use_container_width=True)
 
 # -------------------------
-# Allocation Advisor (AI-like)
+# Allocation Advisor
 # -------------------------
 elif nav == "Allocation Advisor":
     st.markdown(f"<div class='titlebig'>AI Allocation Advisor</div>", unsafe_allow_html=True)
-    st.write("Quick explainable suggestions. Think of this as a mentor's first pass, not personalised financial advice.")
+    st.write("Quick explainable suggestions.")
     age2 = st.number_input("Your age", 20, 80, 35, key="age2")
     risk2 = st.selectbox("Risk appetite", ["Low","Moderate","High"], index=1, key="risk2")
     horizon2 = st.slider("Goal horizon (years)", 1, 30, 10, key="hor2")
@@ -397,7 +405,6 @@ elif nav == "Goals & SIP":
         inflation = st.slider("Inflation (%)", 0.0, 12.0, 4.5)
         fv, real = sip_projection(monthly, years, exp_ret/100, inflation/100)
         st.metric("Projected corpus (nominal)", f"₹{fv:,.0f}", f"Inflation-adjusted: ₹{real:,.0f}")
-        # monthly curve
         months = years * 12
         vals = []
         bal = 0.0
