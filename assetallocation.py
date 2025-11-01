@@ -374,7 +374,7 @@ elif page == "Goals":
         edited_goals = st.data_editor(goals_df, num_rows="dynamic", use_container_width=True)
         # coerce numeric types & store back
         for r in edited_goals.to_dict("records"):
-            r["years"] = int(float(r.get("years", r.get("Years", 0) if r.get("Years", None) is not None else 0) or 0))
+            try:     val = r.get("years") or r.get("Years") or 0     r["years"] = int(float(val)) if str(val).replace('.', '', 1).isdigit() else 0 except Exception:     r["years"] = 0
         # normalize keys to expected names
         st.session_state.goals = []
         for row in edited_goals.to_dict("records"):
