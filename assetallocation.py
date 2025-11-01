@@ -51,7 +51,7 @@ if menu == "💹 Live Market":
                 "Change (%)": round(((data["Close"].iloc[-1] - data["Close"].iloc[-2]) / data["Close"].iloc[-2]) * 100, 2)
             })
     df = pd.DataFrame(df_list)
-    df["Status"] = np.where(df["Change (%)"] > 0, "▲ Gain", "▼ Loss")
+    # Ensure Change (%) column exists before using it if "Change (%)" not in df.columns and "Price" in df.columns and "Prev Close" in df.columns:     df["Change (%)"] = ((df["Price"] - df["Prev Close"]) / df["Prev Close"]) * 100  if "Change (%)" in df.columns:     df["Status"] = np.where(df["Change (%)"] > 0, "▲ Gain", "▼ Loss") else:     df["Status"] = "N/A"
 
     fig = go.Figure(data=[go.Table(
         header=dict(values=list(df.columns),
