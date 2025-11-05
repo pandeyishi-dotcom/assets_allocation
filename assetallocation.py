@@ -1,509 +1,419 @@
-# wealthos_v4.py
-# AI WealthOS — Professional Portfolio Intelligence (V4)
-# Features:
-# 1) Live Market with smart fallbacks, mode badges, timestamps, refresh
-# 2) Portfolio sector analytics (allocation, avg perf, highlight)
-# 3) Alpha/Beta/Correlation vs NIFTY (portfolio vs benchmark)
-# 4) Goals & SIP with Monte Carlo (10k paths) + success probability
-# 5) Export PDF Investor Report (summary, allocation, sectors, alpha/beta, MC, SIP)
-# 6) Modern sidebar: logo, profile, rotating quote, compact nav, live refresh
+# your_investment_guide.py
+# Your Investment Guide — Portfolio Intelligence Suite (V5)
+# Combines: V2 modules + Pro upgrades (fallback live data, sector analytics, alpha/beta, MC, PDF)
+# Requirements: streamlit, yfinance, pandas, numpy, plotly, fpdf (for PDF)
+# Optional: pip install streamlit yfinance pandas numpy plotly fpdf
 
 import streamlit as st
+import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-import yfinance as yf
-from datetime import datetime, date
-from fpdf import FPDF
-import io
+from datetime import datetime, date, timedelta
 import random
-import math
+from io import BytesIO
+try:
+    from fpdf import FPDF
+    HAS_PDF = True
+except Exception:
+    HAS_PDF = False
 
-# -------------------- CONFIG & THEME --------------------
-st.set_page_config(
-    page_title="AI WealthOS — Portfolio Intelligence",
-    page_icon="💼",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+# ------------- CONFIG & THEME -------------
+st.set_page_config(page_title="Your Investment Guide", layout="wide", page_icon="💠", initial_sidebar_state="expanded")
 
-# Pro “terminal” dark style
-st.markdown("""
+THEME = {
+    "bg": "#0b1220",         # deep bloomberg-ish blue/black
+    "panel": "#121a2b",
+    "accent": "#5ae0c8",
+    "accent2": "#9cc3ff",
+    "muted": "#a9b3c7",
+    "text": "#e6eef5"
+}
+
+st.markdown(f"""
 <style>
-  :root { --accent:#33C3F0; --accent2:#00FFC6; --muted:#9FB4C8; }
-  .stApp { background: linear-gradient(180deg,#0A0E14 0%, #0E141B 100%); color:#E5EDF3; }
-  h1,h2,h3,h4,h5 { color:#33C3F0; font-weight:700; letter-spacing:0.2px; }
-  .metric-label, .css-10trblm { color:#DCE7F3 !important; }
-  div[data-testid="stSidebar"]{
-    background: linear-gradient(180deg,#0C1118 0%, #0A0E14 100%);
-    border-right:1px solid rgba(255,255,255,0.06);
-  }
-  .box { background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.06);
-         border-radius:12px; padding:14px; }
-  .badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px;
-           border:1px solid rgba(255,255,255,0.12); margin-left:6px; }
-  .badge-live { color:#0f0; border-color:#0f5; }
-  .badge-fb { color:#ffb020; border-color:#cc8a12; }
-  .badge-off { color:#ff6b6b; border-color:#cc4b4b; }
-  .muted { color:#9FB4C8; }
-  .small { font-size:12px; color:#8FA3B8; }
-  .quote { font-style:italic; color:#cfeee6; }
-  .navbtn button { width:100%; text-align:left; }
+  .stApp {{ background: linear-gradient(180deg, {THEME['bg']} 0%, #0c1a2a 100%); color:{THEME['text']}; }}
+  div[data-testid="stSidebar"] {{ background:{THEME['panel']}; color:{THEME['text']}; }}
+  .titlebig{{ font-size:28px; color:{THEME['accent']}; font-weight:800; margin-bottom:6px; }}
+  .muted{{ color:{THEME['muted']}; }}
+  .card{{ background:{THEME['panel']}; padding:14px; border-radius:12px; border:1px solid rgba(255,255,255,0.06); }}
+  .chip{{ display:inline-block; padding:2px 10px; border-radius:999px; background:#0f2740; color:{THEME['accent2']}; font-size:12px; margin-right:6px; }}
+  .greeting {{ font-size:18px; color:{THEME['accent']}; font-weight:700; }}
+  .quote {{ color:{THEME['muted']}; font-style:italic; }}
+  .hdr {{ color:{THEME['accent2']}; font-weight:700; }}
 </style>
 """, unsafe_allow_html=True)
 
-# -------------------- UTILITIES --------------------
-def greeting():
-    hr = datetime.now().hour
-    if hr < 12: return "Good morning"
-    if hr < 17: return "Good afternoon"
-    return "Good evening"
-
+# ------------- QUOTES & HELPERS -------------
 QUOTES = [
-    "Price is what you pay. Value is what you get.",
-    "Small edges, repeated, become big outcomes.",
-    "Volatility is a feature, not a bug—if you’re prepared.",
-    "Diversification is the only free lunch in finance.",
-    "Liquidity is abundant—until you need it most."
+    "Invest early. Time is the compounding engine.",
+    "Diversify to control risk, not eliminate it.",
+    "Plan like a pessimist, invest like an optimist.",
+    "Volatility is the price of returns.",
+    "Small, repeatable edges beat heroic bets."
 ]
 
-@st.cache_data(ttl=300)
-def fetch_prices(symbols, period="5d", interval="15m"):
+def greeting():
+    h = datetime.now().hour
+    return "Good morning" if h < 12 else ("Good afternoon" if h < 17 else "Good evening")
+
+def fmt_inr(x):
     try:
-        df = yf.download(symbols, period=period, interval=interval, progress=False)
-        return df
+        return "₹{:,.0f}".format(float(x))
+    except:
+        return str(x)
+
+@st.cache_data(ttl=300)
+def fetch_symbol(symbol, period="5d", interval="15m"):
+    try:
+        return yf.download(symbol, period=period, interval=interval, progress=False)
     except Exception:
         return pd.DataFrame()
 
-@st.cache_data(ttl=300)
-def fetch_history(ticker, period="5y", interval="1d"):
-    try:
-        t = yf.Ticker(ticker)
-        df = t.history(period=period, interval=interval)
-        return df
-    except Exception:
-        return pd.DataFrame()
+def fetch_nifty_smart():
+    """Live -> daily close -> sample. Returns (df, mode, info_str, last_trading_day)."""
+    # Try intraday
+    df = fetch_symbol("^NSEI", period="5d", interval="15m")
+    if not df.empty:
+        last_day = pd.to_datetime(df.index[-1]).date()
+        info = "intraday 15m (5d)"
+        return df, "Live", info, last_day
+    # Fallback daily
+    df = fetch_symbol("^NSEI", period="1mo", interval="1d")
+    if not df.empty:
+        last_day = pd.to_datetime(df.index[-1]).date()
+        info = "daily close (1mo)"
+        return df, "Fallback", info, last_day
+    # Sample
+    now = pd.Timestamp.now()
+    sample = pd.DataFrame({
+        "Open": [20050, 20100, 19980, 20090, 20200, 20300],
+        "High": [20200, 20250, 20080, 20400, 20350, 20450],
+        "Low":  [19900, 20010, 19850, 20000, 20150, 20210],
+        "Close":[20100, 19980, 20050, 20300, 20250, 20350],
+        "Volume":[1000,1100,1050,1200,900,950]
+    }, index=pd.date_range(end=now, periods=6, freq="D"))
+    last_day = pd.to_datetime(sample.index[-1]).date()
+    return sample, "Offline", "sample dataset", last_day
 
-def safe_last_trading_day(hist_df):
-    try:
-        return pd.to_datetime(hist_df.index[-1]).date()
-    except Exception:
-        return None
+# Quick sector map (extend as needed)
+SECTOR_MAP = {
+    "TCS.NS":"IT","INFY.NS":"IT","WIPRO.NS":"IT",
+    "HDFCBANK.NS":"Banking","ICICIBANK.NS":"Banking","KOTAKBANK.NS":"Banking",
+    "RELIANCE.NS":"Energy","ONGC.NS":"Energy","BPCL.NS":"Energy",
+    "SUNPHARMA.NS":"Pharma","DRREDDY.NS":"Pharma","CIPLA.NS":"Pharma",
+    "HINDUNILVR.NS":"FMCG","NESTLEIND.NS":"FMCG","BRITANNIA.NS":"FMCG"
+}
 
-def compute_portfolio_value(df_holdings):
-    # df_holdings: Symbol, Quantity, BuyPrice (optional)
-    df = df_holdings.copy()
-    df["Symbol"] = df["Symbol"].astype(str).str.strip()
-    prices = {}
-    for s in df["Symbol"].unique():
-        h = fetch_history(s, period="1mo", interval="1d")
-        prices[s] = float(h["Close"].iloc[-1]) if not h.empty else np.nan
-    df["LTP"] = df["Symbol"].map(prices)
-    df["Value"] = df["LTP"] * df["Quantity"].astype(float)
-    if "BuyPrice" in df.columns:
-        df["Cost"] = df["BuyPrice"].astype(float) * df["Quantity"].astype(float)
-        df["P&L"] = df["Value"] - df["Cost"]
-        df["P&L %"] = np.where(df["Cost"]!=0, df["P&L"]/df["Cost"]*100, np.nan)
-    return df
-
-def alpha_beta(port_ret, bench_ret):
-    # daily returns aligned (Series)
-    if len(port_ret) < 5:
-        return np.nan, np.nan, np.nan
-    port = port_ret.dropna()
-    bench = bench_ret.dropna()
-    idx = port.index.intersection(bench.index)
-    if len(idx) < 5: return np.nan, np.nan, np.nan
-    x = bench.loc[idx].values
-    y = port.loc[idx].values
-    # regression y = a + b x   (beta = cov/var)
-    var_x = np.var(x)
-    if var_x == 0: return np.nan, np.nan, np.nan
-    beta = np.cov(x,y, ddof=1)[0,1] / var_x
-    alpha = np.mean(y) - beta*np.mean(x)
-    corr = np.corrcoef(x,y)[0,1]
-    # annualize alpha assuming 252 trading days
-    alpha_annual = (1 + alpha)**252 - 1 if alpha > -1 else np.nan
-    return alpha_annual, beta, corr
-
-def mc_simulation(init, monthly, years, mean_ann, vol_ann, sims=10000, seed=42):
-    np.random.seed(seed)
-    months = int(years*12)
-    mean_m = (1+mean_ann)**(1/12)-1
-    vol_m = vol_ann/np.sqrt(12)
-    results = np.zeros(sims)
-    for s in range(sims):
-        bal = init
-        for m in range(months):
-            r = np.random.normal(mean_m, vol_m)
-            bal = bal*(1+r) + monthly
-        results[s] = bal
-    return results
-
-def make_report_pdf(name, alloc_df, sector_df, alpha_val, beta_val, corr_val,
-                    mc_stats, sip_cfg):
-    pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=15)
-    pdf.add_page()
-    pdf.set_font("Arial", "B", 16)
-    pdf.cell(0, 10, f"AI WealthOS — Investor Report", ln=1)
-    pdf.set_font("Arial", "", 12)
-    pdf.cell(0, 8, f"Prepared for: {name}", ln=1)
-    pdf.cell(0, 8, f"Generated: {datetime.now().strftime('%d %b %Y, %I:%M %p')}", ln=1)
-    pdf.ln(4)
-
-    pdf.set_font("Arial", "B", 13)
-    pdf.cell(0, 8, "Allocation Summary", ln=1)
-    pdf.set_font("Arial", "", 11)
-    if alloc_df is not None and not alloc_df.empty:
-        for _, r in alloc_df.iterrows():
-            pdf.cell(0, 6, f"- {r['Symbol']}: Qty {r.get('Quantity','-')}, "
-                           f"Value ₹{r.get('Value',0):,.0f}", ln=1)
-    else:
-        pdf.cell(0, 6, "No holdings uploaded.", ln=1)
-    pdf.ln(2)
-
-    pdf.set_font("Arial", "B", 13)
-    pdf.cell(0, 8, "Sector Breakdown (by Value)", ln=1)
-    pdf.set_font("Arial", "", 11)
-    if sector_df is not None and not sector_df.empty:
-        for _, r in sector_df.iterrows():
-            pdf.cell(0, 6, f"- {r['Sector']}: {r['Weight %']:.1f}%", ln=1)
-    else:
-        pdf.cell(0, 6, "Not available.", ln=1)
-    pdf.ln(2)
-
-    pdf.set_font("Arial", "B", 13)
-    pdf.cell(0, 8, "Performance vs NIFTY", ln=1)
-    pdf.set_font("Arial", "", 11)
-    pdf.cell(0, 6, f"Alpha (annualized): {np.nan_to_num(alpha_val)*100:.2f}%", ln=1)
-    pdf.cell(0, 6, f"Beta: {np.nan_to_num(beta_val):.2f}", ln=1)
-    pdf.cell(0, 6, f"Correlation: {np.nan_to_num(corr_val):.2f}", ln=1)
-    pdf.ln(2)
-
-    pdf.set_font("Arial", "B", 13)
-    pdf.cell(0, 8, "Monte Carlo (Final Corpus)", ln=1)
-    pdf.set_font("Arial", "", 11)
-    p10, p50, p90, prob = mc_stats
-    pdf.cell(0, 6, f"P10: ₹{p10:,.0f}   Median: ₹{p50:,.0f}   P90: ₹{p90:,.0f}", ln=1)
-    pdf.cell(0, 6, f"Probability of meeting target: {prob:.1f}%", ln=1)
-
-    pdf.ln(2)
-    pdf.set_font("Arial", "B", 13)
-    pdf.cell(0, 8, "SIP Configuration", ln=1)
-    pdf.set_font("Arial", "", 11)
-    pdf.cell(0, 6, f"Monthly SIP: ₹{sip_cfg.get('sip',0):,}", ln=1)
-    pdf.cell(0, 6, f"Horizon: {sip_cfg.get('years',0)} years   "
-                   f"Expected return: {sip_cfg.get('exp',0)}%   "
-                   f"Target: ₹{sip_cfg.get('target',0):,}", ln=1)
-
-    pdf_bytes = pdf.output(dest="S").encode("latin1")
-    return pdf_bytes
-
-# -------------------- SIDEBAR --------------------
+# ------------- SIDEBAR (Professional + Interactive) -------------
 with st.sidebar:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/6/6b/NSE_Logo.svg", width=120)
-    st.markdown(f"### {greeting()}, Investor")
-    if "username" not in st.session_state:
-        st.session_state.username = "Guest"
-    st.session_state.username = st.text_input("Name", value=st.session_state.username).strip() or "Guest"
+    st.markdown("<div class='titlebig'>Your Investment Guide</div>", unsafe_allow_html=True)
+    colL, colR = st.columns([1,1])
+    with colL:
+        name_in = st.text_input("Investor name", value=st.session_state.get("user_name", "Ishani"))
+    with colR:
+        if st.button("🔁 New Quote", use_container_width=True):
+            st.session_state["quote"] = random.choice(QUOTES)
 
+    if name_in:
+        st.session_state["user_name"] = name_in.strip().title()
     if "quote" not in st.session_state:
-        st.session_state.quote = random.choice(QUOTES)
-    with st.expander("Daily insight", expanded=False):
-        if st.button("🔁 New quote"):
-            st.session_state.quote = random.choice(QUOTES)
-        st.markdown(f"<div class='quote'>“{st.session_state.quote}”</div>", unsafe_allow_html=True)
+        st.session_state["quote"] = random.choice(QUOTES)
+
+    st.markdown(f"<div class='greeting'>{greeting()}, {st.session_state['user_name']} 👋</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='quote'>“{st.session_state['quote']}”</div>", unsafe_allow_html=True)
 
     st.markdown("---")
-    st.markdown("#### Navigation")
-
-    # Compact nav with icons
-    menu = st.radio(
-        "Go to",
-        ["🏠 Overview", "💹 Live Market", "📂 Portfolio", "📊 Sector Analytics",
-         "📈 Alpha & Beta", "🎯 Goals & Monte Carlo", "📄 Export Report"],
-        label_visibility="collapsed"
-    )
+    nav = st.radio("Navigate", [
+        "🏠 Overview",
+        "💹 Live Market",
+        "📈 Market Pulse",
+        "📂 Portfolio",
+        "📊 Sector Analytics",
+        "🧩 Asset Allocation",
+        "🤖 Allocation Advisor",
+        "🎯 Goals & SIP",
+        "🔬 Monte Carlo",
+        "🧾 PDF Report",
+        "📡 Watchlist"
+    ], index=0)
 
     st.markdown("---")
-    refresh_live = st.checkbox("Enable manual refresh on Live Market", value=True)
-    if refresh_live and menu == "💹 Live Market":
-        do_refresh = st.button("🔄 Refresh live data")
+    st.caption("Pro theme • Smart fallbacks • Investor-grade analytics")
 
-# -------------------- 1) OVERVIEW --------------------
-if menu == "🏠 Overview":
-    st.title("AI WealthOS — Portfolio Intelligence")
-    st.markdown(f"**Welcome, {st.session_state.username}.** A professional cockpit for market insight, portfolio diagnostics, and goal planning.")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Platform Latency", "Low", "Optimized")
-    c2.metric("Theme", "Pro Dark")
-    c3.metric("Status", "Ready")
+# ------------- PAGES -------------
 
-    st.markdown("#### What you can do here")
-    st.markdown("""
-    - Track **live NIFTY** with smart fallbacks and mode badges.
-    - Upload your **portfolio** and get **sector analytics**.
-    - Measure **Alpha / Beta / Correlation** vs NIFTY.
-    - Plan with **SIP + Monte Carlo** and export a **PDF investor report**.
-    """)
+# 🏠 Overview
+if nav == "🏠 Overview":
+    st.markdown("<div class='titlebig'>Dashboard Overview</div>", unsafe_allow_html=True)
+    df_n, mode, info, ltd = fetch_nifty_smart()
+    last_refresh = datetime.now().strftime("%d %b %Y, %I:%M %p")
+    c1, c2, c3, c4 = st.columns(4)
+    latest = float(df_n["Close"].iloc[-1])
+    prev = float(df_n["Close"].iloc[-2]) if len(df_n)>=2 else latest
+    delta = latest - prev
+    pct = (delta/prev*100) if prev else 0
+    c1.metric("NIFTY 50", f"{latest:,.2f}", f"{pct:+.2f}%")
+    c2.markdown(f"<span class='chip'>Mode: {mode}</span>", unsafe_allow_html=True)
+    c3.markdown(f"<span class='chip'>Source: {info}</span>", unsafe_allow_html=True)
+    c4.markdown(f"<span class='chip'>Last refreshed: {last_refresh}</span>", unsafe_allow_html=True)
+    st.markdown(f"<div class='muted'>Last trading day: {ltd.strftime('%d %b %Y')}</div>", unsafe_allow_html=True)
+    st.write("")
+    st.line_chart(df_n["Close"], use_container_width=True)
 
-# -------------------- 2) LIVE MARKET --------------------
-elif menu == "💹 Live Market":
-    st.title("Live Market — NIFTY 50")
-    mode = "Offline"
-    df = pd.DataFrame()
-    ts = datetime.now().strftime("%d %b %Y, %I:%M %p")
-
-    # Intraday attempt
-    intraday = fetch_prices("^NSEI", period="5d", interval="15m")
-    if not intraday.empty and "Close" in intraday.columns:
-        df = intraday["Close"].dropna()
-        mode = "Live"
-    else:
-        # Daily fallback
-        daily = fetch_prices("^NSEI", period="1mo", interval="1d")
-        if not daily.empty and "Close" in daily.columns:
-            df = daily["Close"].dropna()
-            mode = "Fallback"
-        else:
-            # Sample
-            idx = pd.date_range(end=pd.Timestamp.now(), periods=20, freq="D")
-            df = pd.Series(np.cumsum(np.random.randn(20)) + 20000, index=idx, name="Close")
-            mode = "Offline"
-
-    last_trading = df.index[-1].date() if len(df) else None
-
-    badge = {"Live":"badge-live", "Fallback":"badge-fb", "Offline":"badge-off"}[mode]
-    st.markdown(f"**Mode:** <span class='badge {badge}'>{mode}</span> &nbsp; "
-                f"<span class='small'>Last refreshed: {ts}</span>", unsafe_allow_html=True)
-    if last_trading:
-        st.markdown(f"<span class='small'>Last trading day: {last_trading.strftime('%d %b %Y')}</span>", unsafe_allow_html=True)
-
-    if refresh_live and 'do_refresh' in locals() and do_refresh:
+# 💹 Live Market (with refresh + fallbacks)
+elif nav == "💹 Live Market":
+    st.markdown("<div class='titlebig'>Live Indian Market</div>", unsafe_allow_html=True)
+    if st.button("🔄 Refresh data"):
         st.cache_data.clear()
-        st.rerun()
+    df_n, mode, info, ltd = fetch_nifty_smart()
+    latest = float(df_n["Close"].iloc[-1])
+    prev = float(df_n["Close"].iloc[-2]) if len(df_n)>=2 else latest
+    d = latest - prev
+    pct = (d/prev*100) if prev else 0
+    a,b,c = st.columns(3)
+    a.metric("Last Price", f"{latest:,.2f}")
+    b.metric("Δ (pts)", f"{d:+.2f}")
+    c.metric("Δ (%)", f"{pct:+.2f}%")
+    st.markdown(f"<span class='chip'>Mode: {mode}</span> <span class='chip'>Source: {info}</span> <span class='chip'>Last day: {ltd.strftime('%d %b %Y')}</span>", unsafe_allow_html=True)
+    st.line_chart(df_n["Close"], use_container_width=True)
+    st.dataframe(df_n.tail(10).round(2), use_container_width=True)
 
-    if len(df) >= 2:
-        latest = float(df.iloc[-1])
-        prev = float(df.iloc[-2])
-        delta = latest - prev
-        pct = delta/prev*100 if prev != 0 else 0.0
-        c1,c2,c3 = st.columns(3)
-        c1.metric("NIFTY (LTP)", f"{latest:,.2f}")
-        c2.metric("Δ (pts)", f"{delta:+.2f}")
-        c3.metric("Δ (%)", f"{pct:+.2f}%")
-        st.line_chart(df, use_container_width=True)
-    else:
-        st.info("Data insufficient to chart.")
-
-# -------------------- 3) PORTFOLIO --------------------
-elif menu == "📂 Portfolio":
-    st.title("Portfolio — Upload & Summary")
-    st.caption("CSV format: Symbol,Quantity,BuyPrice (BuyPrice optional). Example: TCS.NS,5,3500")
-    file = st.file_uploader("Upload holdings CSV", type=["csv"])
-    if file:
-        raw = pd.read_csv(file, header=None)
-        if raw.shape[1] == 2:
-            raw.columns = ["Symbol","Quantity"]
+# 📈 Market Pulse
+elif nav == "📈 Market Pulse":
+    st.markdown("<div class='titlebig'>Market Pulse</div>", unsafe_allow_html=True)
+    tickers = {"NIFTY":"^NSEI","SENSEX":"^BSESN","USD/INR":"INR=X","GOLD":"GC=F","BTC":"BTC-USD"}
+    cols = st.columns(len(tickers))
+    for i,(lbl,sym) in enumerate(tickers.items()):
+        d = fetch_symbol(sym, period="5d", interval="1d")
+        if d.empty: 
+            cols[i].metric(lbl,"N/A")
         else:
-            raw = raw.iloc[:, :3]
-            raw.columns = ["Symbol","Quantity","BuyPrice"]
+            last = float(d["Close"].iloc[-1]); prev = float(d["Close"].iloc[-2]) if len(d)>=2 else last
+            pct = (last-prev)/prev*100 if prev else 0
+            disp = f"{last:,.2f}" if lbl in ["USD/INR","GOLD","BTC"] else f"₹{last:,.2f}"
+            cols[i].metric(lbl, disp, f"{pct:+.2f}%")
+    st.caption("Pulse cached ~5 minutes.")
+
+# 📂 Portfolio
+elif nav == "📂 Portfolio":
+    st.markdown("<div class='titlebig'>Portfolio Tracker</div>", unsafe_allow_html=True)
+    st.write("Upload CSV: `Symbol,Quantity,BuyPrice` (BuyPrice optional). Example: `TCS.NS,5,3500`")
+    up = st.file_uploader("Upload holdings CSV", type=["csv"])
+    if up:
         try:
-            df_hold = compute_portfolio_value(raw)
-            st.subheader("Holdings")
-            st.dataframe(df_hold.round(2), use_container_width=True)
-            total_value = df_hold["Value"].sum()
-            total_cost = df_hold["Cost"].sum() if "Cost" in df_hold.columns else np.nan
-            pnl = total_value - total_cost if not np.isnan(total_cost) else np.nan
-            c1,c2,c3 = st.columns(3)
-            c1.metric("Total Market Value", f"₹{total_value:,.0f}")
-            c2.metric("Total P&L", "N/A" if np.isnan(pnl) else f"₹{pnl:,.0f}")
-            c3.metric("Tickers", df_hold["Symbol"].nunique())
-            st.session_state.portfolio_df = df_hold
-        except Exception as e:
-            st.error(f"Parsing error: {e}")
-    else:
-        st.info("Upload CSV to compute values.")
-
-# -------------------- 4) SECTOR ANALYTICS --------------------
-elif menu == "📊 Sector Analytics":
-    st.title("Sector Analytics — Allocation & Pulse")
-    df_hold = st.session_state.get("portfolio_df")
-    if df_hold is None or df_hold.empty:
-        st.warning("Upload your portfolio in the **Portfolio** tab first.")
-    else:
-        # Minimal ticker→sector mapping (extend as needed)
-        SECTOR_MAP = {
-            "RELIANCE.NS":"Energy","ONGC.NS":"Energy","BPCL.NS":"Energy",
-            "TCS.NS":"IT","INFY.NS":"IT","WIPRO.NS":"IT","HCLTECH.NS":"IT","TECHM.NS":"IT",
-            "HDFCBANK.NS":"Banking","ICICIBANK.NS":"Banking","KOTAKBANK.NS":"Banking","SBIN.NS":"Banking","AXISBANK.NS":"Banking",
-            "HINDUNILVR.NS":"FMCG","NESTLEIND.NS":"FMCG","BRITANNIA.NS":"FMCG",
-            "SUNPHARMA.NS":"Pharma","DRREDDY.NS":"Pharma","CIPLA.NS":"Pharma",
-        }
-        df = df_hold.copy()
-        df["Sector"] = df["Symbol"].map(SECTOR_MAP).fillna("Other")
-
-        alloc = df.groupby("Sector")["Value"].sum().reset_index()
-        total = alloc["Value"].sum()
-        alloc["Weight %"] = alloc["Value"]/total*100 if total>0 else 0
-
-        c1,c2 = st.columns([1.1,1])
-        with c1:
-            st.subheader("Allocation by sector")
-            fig = px.pie(alloc, names="Sector", values="Value", hole=0.35,
-                         color_discrete_sequence=px.colors.sequential.Tealgrn)
-            st.plotly_chart(fig, use_container_width=True)
-
-        # Sector performance (avg of last daily % change per sector)
-        perfs = []
-        for sec in alloc["Sector"]:
-            tickers = df[df["Sector"]==sec]["Symbol"].unique().tolist()
-            pct_list = []
-            for t in tickers:
-                h = fetch_history(t, period="5d", interval="1d")
-                try:
-                    last = float(h["Close"].iloc[-1]); prev = float(h["Close"].iloc[-2])
-                    pct_list.append((last-prev)/prev*100 if prev!=0 else 0.0)
-                except Exception:
-                    pass
-            perfs.append(np.nanmean(pct_list) if pct_list else np.nan)
-        perf_df = pd.DataFrame({"Sector":alloc["Sector"], "Avg % Change":perfs}).dropna()
-
-        with c2:
-            st.subheader("Sector daily pulse")
-            if not perf_df.empty:
-                top_row = perf_df.sort_values("Avg % Change", ascending=False).iloc[0]
-                st.metric("Top sector today", f"{top_row['Sector']}", f"{top_row['Avg % Change']:+.2f}%")
-                bar = px.bar(perf_df, x="Sector", y="Avg % Change", text="Avg % Change")
-                st.plotly_chart(bar, use_container_width=True)
+            raw = pd.read_csv(up, header=None)
+            if raw.shape[1] == 2: raw.columns = ["Symbol","Quantity"]
             else:
-                st.info("Insufficient recent data for sector pulse.")
+                raw = raw.iloc[:,:3]; raw.columns = ["Symbol","Quantity","BuyPrice"]
+            raw["Symbol"] = raw["Symbol"].astype(str).str.strip().str.upper()
+            raw["Quantity"] = raw["Quantity"].astype(float)
+            if "BuyPrice" in raw.columns: raw["BuyPrice"] = raw["BuyPrice"].astype(float)
+            # attach LTP
+            prices = {}
+            for s in raw["Symbol"].unique():
+                d = fetch_symbol(s, period="5d", interval="1d")
+                prices[s] = float(d["Close"].iloc[-1]) if not d.empty else np.nan
+            raw["LTP"] = raw["Symbol"].map(prices)
+            raw["Value"] = raw["Quantity"] * raw["LTP"]
+            if "BuyPrice" in raw.columns:
+                raw["Cost"] = raw["Quantity"] * raw["BuyPrice"]
+                raw["P&L"] = raw["Value"] - raw["Cost"]
+                raw["P&L %"] = np.where(raw["Cost"]!=0, raw["P&L"]/raw["Cost"]*100, np.nan)
 
-        st.subheader("Sector table")
-        st.dataframe(alloc[["Sector","Weight %"]].sort_values("Weight %", ascending=False),
-                     use_container_width=True)
-        st.session_state.sector_alloc = alloc[["Sector","Weight %"]].sort_values("Weight %", ascending=False)
-
-# -------------------- 5) ALPHA & BETA --------------------
-elif menu == "📈 Alpha & Beta":
-    st.title("Performance vs NIFTY — Alpha, Beta & Correlation")
-    df_hold = st.session_state.get("portfolio_df")
-    if df_hold is None or df_hold.empty:
-        st.warning("Upload your portfolio first in **Portfolio**.")
-    else:
-        # Build daily portfolio value series from last 1y
-        tickers = df_hold["Symbol"].unique().tolist()
-        weights_val = (df_hold.groupby("Symbol")["Value"].sum() / df_hold["Value"].sum()).to_dict()
-
-        # fetch histories (1y daily)
-        series = {}
-        for t in tickers:
-            h = fetch_history(t, period="1y", interval="1d")
-            if not h.empty:
-                series[t] = h["Close"].rename(t)
-
-        if not series:
-            st.info("No price history available to compute analytics.")
-        else:
-            pxdf = pd.concat(series.values(), axis=1).dropna(how="all")
-            pxdf = pxdf.fillna(method="ffill")
-            # portfolio value (weighted)
-            w = pd.Series(weights_val)
-            w = w.reindex(pxdf.columns).fillna(0)
-            port_px = (pxdf * w).sum(axis=1)
-            port_ret = port_px.pct_change().dropna()
-
-            # benchmark (NIFTY)
-            nifty = fetch_history("^NSEI", period="1y", interval="1d")
-            bench_ret = nifty["Close"].pct_change().dropna() if not nifty.empty else pd.Series(dtype=float)
-
-            a, b, corr = alpha_beta(port_ret, bench_ret)
-
+            st.dataframe(raw.round(2), use_container_width=True)
             c1,c2,c3 = st.columns(3)
-            c1.metric("Alpha (annualized)", f"{np.nan_to_num(a)*100:.2f}%")
-            c2.metric("Beta", f"{np.nan_to_num(b):.2f}")
-            c3.metric("Correlation", f"{np.nan_to_num(corr):.2f}")
+            c1.metric("Market Value", fmt_inr(raw["Value"].sum()))
+            if "Cost" in raw.columns:
+                pnl = raw["P&L"].sum(); c2.metric("Total P&L", fmt_inr(pnl), f"{(pnl/raw['Cost'].sum()*100):+.2f}%")
+            c3.metric("Tickers", raw["Symbol"].nunique())
 
-            # Chart: indexed performance
-            try:
-                df_chart = pd.DataFrame({
-                    "Portfolio": (1+port_ret).cumprod()*100,
-                    "NIFTY": (1+bench_ret.reindex(port_ret.index, method="ffill")).cumprod()*100
-                }).dropna()
-                line = px.line(df_chart, labels={"value":"Indexed (100=Start)","index":"Date"})
-                st.plotly_chart(line, use_container_width=True)
-            except Exception:
-                st.info("Could not render comparison chart.")
+            # pie
+            alloc = raw.groupby("Symbol")["Value"].sum().reset_index()
+            if not alloc.empty:
+                fig = px.pie(alloc, names="Symbol", values="Value", title="Allocation", color_discrete_sequence=px.colors.sequential.Tealgrn)
+                st.plotly_chart(fig, use_container_width=True)
 
-            st.session_state.alpha_val = a
-            st.session_state.beta_val = b
-            st.session_state.corr_val = corr
+            st.session_state["portfolio_df"] = raw
+        except Exception as e:
+            st.error(f"Error: {e}")
+    else:
+        st.info("Upload your CSV to see valuation and allocation.")
 
-# -------------------- 6) GOALS & MONTE CARLO --------------------
-elif menu == "🎯 Goals & Monte Carlo":
-    st.title("Goals, SIP & Monte Carlo")
-    c1,c2,c3,c4 = st.columns(4)
-    with c1:
-        lump = st.number_input("Current Lump Sum (₹)", 0, 10_00_00_000, 2_00_000, step=10_000)
-    with c2:
-        sip = st.number_input("Monthly SIP (₹)", 0, 10_00_000, 10_000, step=1_000)
-    with c3:
-        years = st.slider("Horizon (years)", 1, 40, 15)
-    with c4:
-        exp_ret = st.slider("Expected Return (p.a. %)", 3.0, 20.0, 10.0)
+# 📊 Sector Analytics (uses uploaded portfolio)
+elif nav == "📊 Sector Analytics":
+    st.markdown("<div class='titlebig'>Sector Analytics</div>", unsafe_allow_html=True)
+    pf = st.session_state.get("portfolio_df")
+    if pf is None:
+        st.warning("Upload your portfolio in the Portfolio tab first.")
+    else:
+        tmp = pf.assign(Sector=pf["Symbol"].map(SECTOR_MAP).fillna("Other"))
+        sector_alloc = tmp.groupby("Sector")["Value"].sum().reset_index().sort_values("Value", ascending=False)
+        col1, col2 = st.columns([1,1])
+        with col1:
+            st.subheader("Sector allocation")
+            fig = px.pie(sector_alloc, names="Sector", values="Value", hole=0.3, color_discrete_sequence=px.colors.sequential.Tealgrn)
+            st.plotly_chart(fig, use_container_width=True)
+        with col2:
+            st.subheader("Avg sector % change (last day)")
+            rows=[]
+            for sec, g in tmp.groupby("Sector"):
+                ch=[]
+                for s in g["Symbol"].unique():
+                    d = fetch_symbol(s, period="5d", interval="1d")
+                    if not d.empty and len(d)>=2:
+                        last, prev = float(d["Close"].iloc[-1]), float(d["Close"].iloc[-2])
+                        if prev: ch.append((last-prev)/prev*100)
+                rows.append({"Sector":sec, "Change%": np.mean(ch) if ch else 0.0})
+            sec_perf = pd.DataFrame(rows).sort_values("Change%", ascending=False)
+            bar = px.bar(sec_perf, x="Sector", y="Change%", text="Change%")
+            st.plotly_chart(bar, use_container_width=True)
+        if not sector_alloc.empty:
+            top_sec = sector_alloc.iloc[0]
+            st.success(f"Top allocation: {top_sec['Sector']} — {fmt_inr(top_sec['Value'])}")
 
-    # Approx volatility assumption by risk class (simple)
-    vol = st.select_slider("Volatility band (p.a.)", options=[0.08,0.12,0.16,0.20], value=0.16)
+# 🧩 Asset Allocation (manual sliders)
+elif nav == "🧩 Asset Allocation":
+    st.markdown("<div class='titlebig'>Asset Allocation Builder</div>", unsafe_allow_html=True)
+    options = ["Equity","Debt","Gold","REITs","International","Cash"]
+    w = {}
+    cols = st.columns(3)
+    for i,opt in enumerate(options):
+        with cols[i%3]:
+            w[opt] = st.slider(f"{opt} (%)", 0, 100, 15)
+    total = sum(w.values())
+    if total != 100:
+        st.warning(f"Allocations must total 100%. Current: {total}%")
+    else:
+        df = pd.DataFrame(list(w.items()), columns=["Asset Class","Allocation (%)"])
+        fig = px.pie(df, names="Asset Class", values="Allocation (%)", color_discrete_sequence=px.colors.sequential.Tealgrn)
+        st.plotly_chart(fig, use_container_width=True)
+        st.success("Allocation saved (session).")
 
-    target = st.number_input("Target Corpus (₹)", 0, 100_00_00_000, 1_00_00_000, step=50_000)
+# 🤖 Allocation Advisor (rule-based)
+elif nav == "🤖 Allocation Advisor":
+    st.markdown("<div class='titlebig'>AI Allocation Advisor (Rule-based)</div>", unsafe_allow_html=True)
+    age = st.number_input("Age", 18, 80, 35)
+    risk = st.selectbox("Risk appetite", ["Low","Moderate","High"], index=1)
+    horizon = st.slider("Horizon (years)", 1, 40, 10)
+    # simple rule:
+    base_equity = 70 if age<=30 else (40 if age>=45 else 60)
+    equity = base_equity + (10 if risk=="High" else (-20 if risk=="Low" else 0))
+    if horizon>=15: equity += 5
+    if horizon<=5: equity -= 5
+    equity = int(np.clip(equity, 10, 90))
+    debt = 100 - equity
+    alloc = pd.DataFrame({
+        "Asset Class":["Large-cap Equity","Mid/Small-cap Equity","International Equity","Debt — Govt","Debt — Corporate","Gold","REITs","Cash/Liquid"],
+        "Allocation %":[int(equity*0.45), int(equity*0.25), int(equity*0.10), int(debt*0.6), int(debt*0.3), 8, 5, 5]
+    })
+    # normalize
+    diff = 100 - alloc["Allocation %"].sum()
+    alloc.loc[alloc.index[0], "Allocation %"] += diff
+    st.dataframe(alloc, use_container_width=True)
+    bar = px.bar(alloc, x="Asset Class", y="Allocation %", text="Allocation %")
+    st.plotly_chart(bar, use_container_width=True)
+    st.info(f"Rationale: age {age}, risk {risk}, horizon {horizon}y → equity tilt {equity}%.")
 
-    with st.spinner("Running Monte Carlo (10k paths)…"):
-        sims = mc_simulation(lump, sip, years, exp_ret/100, vol, sims=10_000)
-    p10 = float(np.percentile(sims, 10))
-    p50 = float(np.percentile(sims, 50))
-    p90 = float(np.percentile(sims, 90))
-    prob = float((sims >= target).mean()*100)
+# 🎯 Goals & SIP
+elif nav == "🎯 Goals & SIP":
+    st.markdown("<div class='titlebig'>Goals & SIP Simulator</div>", unsafe_allow_html=True)
+    mode = st.selectbox("Mode", ["SIP (monthly)","Lump sum"], index=0)
+    if mode == "SIP (monthly)":
+        monthly = st.number_input("Monthly SIP (₹)", 100, 200000, 5000)
+        years = st.slider("Years", 1, 40, 15)
+        exp = st.slider("Expected annual return (%)", 3.0, 20.0, 10.0)
+        r = exp/100/12
+        months = years*12
+        fv = monthly*((1+r)**months - 1)/r if r!=0 else monthly*months
+        st.metric("Projected corpus", fmt_inr(fv), f"{exp}%")
+        df = pd.DataFrame({"Month":range(1,months+1),
+                           "Balance":[monthly*(((1+r)**m - 1)/r if r!=0 else m) for m in range(1, months+1)]})
+        st.line_chart(df.set_index("Month"), use_container_width=True)
+    else:
+        principal = st.number_input("Lump sum (₹)", 10000, 100000000, 100000)
+        years = st.slider("Years", 1, 40, 10)
+        exp = st.slider("Expected annual return (%)", 3.0, 20.0, 9.0)
+        fv = principal*((1+exp/100)**years)
+        st.metric("Projected corpus", fmt_inr(fv), f"{exp}%")
 
-    c1,c2,c3,c4 = st.columns(4)
-    c1.metric("P10", f"₹{p10:,.0f}")
-    c2.metric("Median", f"₹{p50:,.0f}")
-    c3.metric("P90", f"₹{p90:,.0f}")
-    c4.metric("Success Prob.", f"{prob:.1f}%")
+# 🔬 Monte Carlo (goal probability)
+elif nav == "🔬 Monte Carlo":
+    st.markdown("<div class='titlebig'>Monte Carlo Goal Probability</div>", unsafe_allow_html=True)
+    corpus_goal = st.number_input("Target corpus (₹)", 100000, 1000000000, 10000000, step=50000)
+    invest_now = st.number_input("Current invested (₹)", 0, 100000000, 500000, step=10000)
+    monthly_sip = st.number_input("Monthly SIP (₹)", 0, 500000, 10000, step=1000)
+    years = st.slider("Horizon (years)", 1, 40, 15)
+    exp_return = st.slider("Expected return (%)", 3.0, 20.0, 11.0)
+    vol = st.slider("Volatility (%)", 5.0, 35.0, 18.0)
+    sims = st.slider("Simulations", 200, 10000, 2000, step=200)
+    # annual steps
+    mu = exp_return/100.0
+    sigma = vol/100.0
+    w = 1.0  # single-asset proxy
+    annual_sip = monthly_sip*12
+    res = np.zeros(sims)
+    for s in range(sims):
+        val = invest_now
+        for y in range(years):
+            ret = np.random.normal(mu, sigma)
+            val = val*(1+ret) + annual_sip
+        res[s] = val
+    prob = (res >= corpus_goal).mean()*100
+    st.metric("Probability of success", f"{prob:.1f}%")
+    st.plotly_chart(px.histogram(res, nbins=60, title="Distribution of outcomes"), use_container_width=True)
 
-    hist = px.histogram(sims, nbins=60, title="Final Corpus Distribution")
-    st.plotly_chart(hist, use_container_width=True)
+# 🧾 PDF Report (from session data)
+elif nav == "🧾 PDF Report":
+    st.markdown("<div class='titlebig'>PDF Investor Report</div>", unsafe_allow_html=True)
+    if not HAS_PDF:
+        st.error("Install `fpdf` to enable PDF export: pip install fpdf")
+    else:
+        pf = st.session_state.get("portfolio_df")
+        df_n, mode, info, ltd = fetch_nifty_smart()
+        latest = float(df_n["Close"].iloc[-1])
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Arial", "B", 16)
+        pdf.cell(0, 10, f"Your Investment Guide — Report for {st.session_state.get('user_name','Investor')}", ln=True)
+        pdf.set_font("Arial", size=12)
+        pdf.cell(0, 8, f"Greeting: {greeting()}", ln=True)
+        pdf.cell(0, 8, f"Quote: {st.session_state.get('quote','')}", ln=True)
+        pdf.cell(0, 8, f"NIFTY: {latest:,.2f}  | Mode: {mode}  | Source: {info}", ln=True)
+        pdf.ln(4)
+        if pf is not None:
+            pdf.cell(0, 8, "Portfolio Allocation:", ln=True)
+            bysym = pf.groupby("Symbol")["Value"].sum().reset_index().sort_values("Value", ascending=False)
+            for _,r in bysym.iterrows():
+                pdf.cell(0, 7, f" - {r['Symbol']}: {fmt_inr(r['Value'])}", ln=True)
+        else:
+            pdf.cell(0, 8, "Portfolio: Not uploaded", ln=True)
+        # output
+        buf = BytesIO()
+        pdf.output(buf)
+        st.download_button("Download PDF", buf.getvalue(), file_name="Your_Investment_Report.pdf", mime="application/pdf")
+        st.info("Report includes greeting, quote, NIFTY snapshot, and portfolio allocation (if uploaded).")
 
-    st.session_state.mc_stats = (p10, p50, p90, prob)
-    st.session_state.sip_cfg = {"sip": sip, "years": years, "exp": exp_ret, "target": target}
-
-# -------------------- 7) EXPORT REPORT --------------------
-elif menu == "📄 Export Report":
-    st.title("Export — PDF Investor Report")
-    alloc_df = st.session_state.get("portfolio_df")
-    sector_df = st.session_state.get("sector_alloc")
-    alpha_val = st.session_state.get("alpha_val", np.nan)
-    beta_val = st.session_state.get("beta_val", np.nan)
-    corr_val = st.session_state.get("corr_val", np.nan)
-    mc_stats = st.session_state.get("mc_stats", (np.nan, np.nan, np.nan, np.nan))
-    sip_cfg = st.session_state.get("sip_cfg", {"sip":0,"years":0,"exp":0,"target":0})
-
-    pdf_bytes = make_report_pdf(
-        name=st.session_state.username,
-        alloc_df=alloc_df if isinstance(alloc_df, pd.DataFrame) else None,
-        sector_df=sector_df if isinstance(sector_df, pd.DataFrame) else None,
-        alpha_val=alpha_val, beta_val=beta_val, corr_val=corr_val,
-        mc_stats=mc_stats, sip_cfg=sip_cfg
-    )
-
-    st.download_button(
-        "📄 Download Investor Report (PDF)",
-        data=pdf_bytes,
-        file_name="AI_WealthOS_Investor_Report.pdf",
-        mime="application/pdf"
-    )
+# 📡 Watchlist
+elif nav == "📡 Watchlist":
+    st.markdown("<div class='titlebig'>Watchlist & Alerts</div>", unsafe_allow_html=True)
+    default = "TCS.NS, INFY.NS, RELIANCE.NS, HDFCBANK.NS"
+    wl = st.text_input("Tickers (comma separated)", value=default)
+    thresh = st.number_input("Alert threshold (%)", 0.5, 20.0, 2.0)
+    if st.button("Fetch"):
+        tickers = [t.strip().upper() for t in wl.split(",") if t.strip()]
+        rows=[]
+        for t in tickers:
+            d = fetch_symbol(t, period="5d", interval="1d")
+            if d.empty:
+                rows.append({"Symbol": t, "Price":"N/A", "Change%":"N/A", "Alert":""})
+            else:
+                last = float(d["Close"].iloc[-1]); prev = float(d["Close"].iloc[-2]) if len(d)>=2 else last
+                pct = (last-prev)/prev*100 if prev else 0.0
+                rows.append({"Symbol": t.replace(".NS",""), "Price": f"₹{last:,.2f}", "Change%": f"{pct:+.2f}%", "Alert":"⚠️" if abs(pct)>=thresh else ""})
+        st.table(pd.DataFrame(rows))
 
 # Footer
 st.markdown("---")
-st.caption("AI WealthOS — Professional tools for insights. This is not investment advice.")
+st.caption("Your Investment Guide — Educational; not investment advice. Verify instruments, taxes, and suitability.")
